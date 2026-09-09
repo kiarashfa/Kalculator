@@ -1,0 +1,10 @@
+/* Self-hosted webfonts — the single place @font-face rules enter the app.
+   Imported once from main.jsx; @fontsource ships woff2 + `font-display: swap`
+   and per-subset unicode-range, so a browser only fetches what a page uses.
+   Weights here mirror exactly what Kalculator.jsx asks for:
+     DM Mono 400/500 (body, keypad, results) · Space Grotesk 400/600/700 (UI headings) */
+@import "@fontsource/dm-mono/400.css";
+@import "@fontsource/dm-mono/500.css";
+@import "@fontsource/space-grotesk/400.css";
+@import "@fontsource/space-grotesk/600.css";
+@import "@fontsource/space-grotesk/700.css";

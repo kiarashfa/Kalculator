@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import Kalculator from './Kalculator.jsx'
+import './styles/fonts.css'
 
 // Top-level error boundary: a bad render (e.g. a malformed AST state) would
 // otherwise white-screen the whole app. Catch it and offer a Reset, which
@@ -33,7 +34,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 
 // PWA: register the service worker for offline use. Production only, so it
 // never interferes with the Vite dev server / HMR. BASE_URL keeps it correct
-// under the GitHub Pages sub-path (/kalculator/).
+// under the GitHub Pages sub-path (/Kalculator/).
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   const base = import.meta.env.BASE_URL
   window.addEventListener('load', () => {

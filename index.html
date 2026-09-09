@@ -3,16 +3,43 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#0a0a0f" />
+    <title>Kalculator</title>
     <meta name="description" content="Kalculator — smart calculator with natural math rendering, equation solver, graphing, unit & currency converter" />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧮</text></svg>" />
-    <!-- PWA: installable + offline (relative paths resolve under the GitHub Pages base) -->
+    <meta name="theme-color" content="#0a0a0f" />
+    <link rel="canonical" href="%SITE_URL%" />
+
+    <!-- Icons. Relative hrefs resolve under the GitHub Pages base path (/Kalculator/)
+         in production and at / in dev, with no build-time URL helper needed. -->
+    <link rel="icon" type="image/svg+xml" href="icons/favicon.svg" />
+    <link rel="icon" type="image/x-icon" href="icons/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+
+    <!-- PWA: installable + offline -->
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="apple-touch-icon" href="icon.svg" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Kalculator" />
-    <title>Kalculator</title>
+
+    <!-- Link preview. og:image must be absolute, so the deployed origin is spelled
+         out here — this is the app's only page, so it is also the only place it appears. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Kalculator" />
+    <meta property="og:url" content="%SITE_URL%" />
+    <meta property="og:title" content="Kalculator" />
+    <meta property="og:description" content="A smart calculator that renders what you type as natural math — plus an equation solver, grapher, and unit & currency converters." />
+    <meta property="og:image" content="%SITE_URL%og/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Kalculator — smart calculator" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Kalculator" />
+    <meta name="twitter:description" content="A smart calculator that renders what you type as natural math — plus an equation solver, grapher, and unit & currency converters." />
+    <meta name="twitter:image" content="%SITE_URL%og/og-image.png" />
+
+    <!-- Analytics. The measurement ID lives only in public/analytics.js, so it
+         stays a one-line change no matter how many pages load it. -->
+    <script async src="analytics.js"></script>
+
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
       html, body, #root { height: 100%; width: 100%; overflow: hidden; }

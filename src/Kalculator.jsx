@@ -33,18 +33,18 @@ function convertTemperature(v,from,to){let c;if(from==="C")c=v;else if(from==="F
 function convertUnit(v,cat,from,to){if(from===to)return v;const c=UNIT_DATA[cat];if(!c)return null;if(cat==="Temperature")return convertTemperature(v,c[from],c[to]);const ff=c[from],tf=c[to];if(typeof ff!=="number"||typeof tf!=="number")return null;return(v*ff)/tf;}
 
 const CURRENCY_DATA = {
-  "USD":{rate:1,name:"US Dollar",flag:"🇺🇸"},"EUR":{rate:0.92,name:"Euro",flag:"🇪🇺"},"GBP":{rate:0.79,name:"British Pound",flag:"🇬🇧"},
-  "JPY":{rate:149.5,name:"Japanese Yen",flag:"🇯🇵"},"AUD":{rate:1.53,name:"Australian Dollar",flag:"🇦🇺"},"CAD":{rate:1.36,name:"Canadian Dollar",flag:"🇨🇦"},
-  "CHF":{rate:0.88,name:"Swiss Franc",flag:"🇨🇭"},"CNY":{rate:7.24,name:"Chinese Yuan",flag:"🇨🇳"},"INR":{rate:83.1,name:"Indian Rupee",flag:"🇮🇳"},
-  "MXN":{rate:17.15,name:"Mexican Peso",flag:"🇲🇽"},"BRL":{rate:4.97,name:"Brazilian Real",flag:"🇧🇷"},"KRW":{rate:1320,name:"South Korean Won",flag:"🇰🇷"},
-  "SGD":{rate:1.34,name:"Singapore Dollar",flag:"🇸🇬"},"HKD":{rate:7.82,name:"Hong Kong Dollar",flag:"🇭🇰"},"SEK":{rate:10.4,name:"Swedish Krona",flag:"🇸🇪"},
-  "NZD":{rate:1.63,name:"New Zealand Dollar",flag:"🇳🇿"},"ZAR":{rate:18.6,name:"S. African Rand",flag:"🇿🇦"},"TRY":{rate:28.9,name:"Turkish Lira",flag:"🇹🇷"},
-  "PLN":{rate:4.05,name:"Polish Zloty",flag:"🇵🇱"},"THB":{rate:35.4,name:"Thai Baht",flag:"🇹🇭"},"AED":{rate:3.67,name:"UAE Dirham",flag:"🇦🇪"},
-  "SAR":{rate:3.75,name:"Saudi Riyal",flag:"🇸🇦"},"ILS":{rate:3.67,name:"Israeli Shekel",flag:"🇮🇱"},"EGP":{rate:30.9,name:"Egyptian Pound",flag:"🇪🇬"},
-  "PKR":{rate:285,name:"Pakistani Rupee",flag:"🇵🇰"},"NGN":{rate:780,name:"Nigerian Naira",flag:"🇳🇬"},"KWD":{rate:0.31,name:"Kuwaiti Dinar",flag:"🇰🇼"},
+  "USD":{rate:1,name:"US Dollar",flag:"🇺🇸"},"EUR":{rate:0.86,name:"Euro",flag:"🇪🇺"},"GBP":{rate:0.74,name:"British Pound",flag:"🇬🇧"},
+  "JPY":{rate:153.8,name:"Japanese Yen",flag:"🇯🇵"},"AUD":{rate:1.39,name:"Australian Dollar",flag:"🇦🇺"},"CAD":{rate:1.38,name:"Canadian Dollar",flag:"🇨🇦"},
+  "CHF":{rate:0.81,name:"Swiss Franc",flag:"🇨🇭"},"CNY":{rate:6.73,name:"Chinese Yuan",flag:"🇨🇳"},"INR":{rate:94.8,name:"Indian Rupee",flag:"🇮🇳"},
+  "MXN":{rate:16.93,name:"Mexican Peso",flag:"🇲🇽"},"BRL":{rate:5.10,name:"Brazilian Real",flag:"🇧🇷"},"KRW":{rate:1341,name:"South Korean Won",flag:"🇰🇷"},
+  "SGD":{rate:1.26,name:"Singapore Dollar",flag:"🇸🇬"},"HKD":{rate:7.84,name:"Hong Kong Dollar",flag:"🇭🇰"},"SEK":{rate:9.59,name:"Swedish Krona",flag:"🇸🇪"},
+  "NZD":{rate:1.71,name:"New Zealand Dollar",flag:"🇳🇿"},"ZAR":{rate:16.0,name:"S. African Rand",flag:"🇿🇦"},"TRY":{rate:48.5,name:"Turkish Lira",flag:"🇹🇷"},
+  "PLN":{rate:3.71,name:"Polish Zloty",flag:"🇵🇱"},"THB":{rate:32.9,name:"Thai Baht",flag:"🇹🇭"},"AED":{rate:3.67,name:"UAE Dirham",flag:"🇦🇪"},
+  "SAR":{rate:3.75,name:"Saudi Riyal",flag:"🇸🇦"},"ILS":{rate:3.02,name:"Israeli Shekel",flag:"🇮🇱"},"EGP":{rate:51.0,name:"Egyptian Pound",flag:"🇪🇬"},
+  "PKR":{rate:277.5,name:"Pakistani Rupee",flag:"🇵🇰"},"NGN":{rate:1322,name:"Nigerian Naira",flag:"🇳🇬"},"KWD":{rate:0.31,name:"Kuwaiti Dinar",flag:"🇰🇼"},
 };
 // Hardcoded snapshot — NOT live. Update this label whenever the rates above change.
-const CURRENCY_RATES_DATE = "late 2023";
+const CURRENCY_RATES_DATE = "September 2026";
 
 // ─── Math Engine ─── math.js-backed (./mathjsEngine.js) + structural tree (./mathAst.js) ─
 
@@ -631,14 +631,15 @@ export default function Kalculator() {
   return (
     <div ref={containerRef} tabIndex={0} onKeyDown={handleKeyDown} className="kalc-root"
       style={{ width:"100%",maxWidth:420,margin:"0 auto",display:"flex",flexDirection:"column",background:"#0a0a0f",color:"#fff",fontFamily:"'DM Mono',monospace",overflow:"hidden",outline:"none" }}>
-      <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet" />
       {showGraph && <GraphView expressions={graphExprs} onClose={()=>setShowGraph(false)} />}
       {showHelp && <HelpOverlay onClose={()=>setShowHelp(false)} />}
 
       {/* Header */}
       <div style={{padding:"12px 16px 8px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <div style={{width:28,height:28,borderRadius:8,background:"linear-gradient(135deg,#f472b6,#8b5cf6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700,color:"#fff"}}>K</div>
+          {/* The brand mark is the favicon itself (public/icons/favicon.svg), served
+              through BASE_URL so it resolves under the GitHub Pages sub-path. */}
+          <img src={`${import.meta.env.BASE_URL}icons/favicon.svg`} alt="" width={28} height={28} style={{display:"block"}} />
           <span style={{fontSize:14,fontWeight:600,color:"#eee",fontFamily:"'Space Grotesk',sans-serif"}}>Kalculator</span>
           <button onClick={()=>setShowHelp(true)} title="Shortcuts & tips" style={{width:18,height:18,borderRadius:"50%",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"#888",fontSize:11,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1,padding:0}}>?</button>
         </div>

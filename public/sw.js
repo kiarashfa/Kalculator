@@ -2,7 +2,7 @@
 // Strategy: stale-while-revalidate for same-origin GET requests. After the
 // first online visit, the app shell + hashed assets are cached, so it launches
 // and works fully offline. Cross-origin requests (e.g. Google Fonts) are not
-// cached — the CSS font stacks fall back to system fonts offline.
+// cached; the webfonts are self-hosted, so they are cached with the app assets.
 const CACHE = "kalculator-v1";
 
 self.addEventListener("install", () => self.skipWaiting());
