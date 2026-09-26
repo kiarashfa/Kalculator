@@ -11,3 +11,6 @@ dist/
 # Local tooling / editor
 .claude/
 .DS_Store
+
+# Internal specs & decisions (not published)
+internal/

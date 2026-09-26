@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import Kalculator from './Kalculator.jsx'
 import './styles/fonts.css'
+import './styles/app.css'
 
 // Top-level error boundary: a bad render (e.g. a malformed AST state) would
 // otherwise white-screen the whole app. Catch it and offer a Reset, which

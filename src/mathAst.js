@@ -4,7 +4,7 @@
 // "seq"   → children[]          (sequence of nodes)
 // "char"  → value               (single character/token)
 // "frac"  → num(seq), den(seq)  (fraction)
-// "sup"   → base(seq), exp(seq) (superscript/exponent)
+// "sup"   → exp(seq)            (exponent; raises the PRECEDING sibling, like MathQuill)
 // "sqrt"  → rad(seq)            (square root)
 // "func"  → name, arg(seq)      (named function)
 // "paren" → inner(seq)          (parenthesized group)
@@ -16,7 +16,7 @@ export function nid() { return ++_nid; }
 export function mkSeq(ch) { return { id: nid(), type: "seq", children: ch || [] }; }
 export function mkChar(v) { return { id: nid(), type: "char", value: v }; }
 export function mkFrac(n, d) { return { id: nid(), type: "frac", num: n || mkSeq(), den: d || mkSeq() }; }
-export function mkSup(b, e) { return { id: nid(), type: "sup", base: b || mkSeq(), exp: e || mkSeq() }; }
+export function mkSup(e) { return { id: nid(), type: "sup", exp: e || mkSeq() }; }
 export function mkSqrt(r) { return { id: nid(), type: "sqrt", rad: r || mkSeq() }; }
 export function mkFunc(name, a) { return { id: nid(), type: "func", name, arg: a || mkSeq() }; }
 export function mkParen(c) { return { id: nid(), type: "paren", inner: c || mkSeq() }; }
@@ -26,12 +26,43 @@ export function toExpr(n) {
   if (!n) return "";
   switch (n.type) {
     case "char": return n.value;
-    case "seq": return n.children.map(toExpr).join("");
+    case "seq": {
+      let out = "";
+      for (const c of n.children) {
+        const s = toExpr(c);
+        // math.js rejects a number right after ")" (2³4 → "2^(3)4", (1+2)3):
+        // make the implied product explicit.
+        if (out.endsWith(")") && /^[0-9.]/.test(s)) out += "*";
+        out += s;
+      }
+      return out;
+    }
     case "frac": return `((${toExpr(n.num)})/(${toExpr(n.den)}))`;
-    case "sup": return `(${toExpr(n.base)})^(${toExpr(n.exp)})`;
+    // Every structure serializes self-delimited, so "^(e)" binds to exactly the
+    // preceding node: 12^(3), sin(x)^(2), ((1)/(2))^(3), (1+2)^(2) all parse right.
+    case "sup": return `^(${toExpr(n.exp)})`;
     case "sqrt": return `sqrt(${toExpr(n.rad)})`;
     case "func": return `${n.name}(${toExpr(n.arg)})`;
     case "paren": return `(${toExpr(n.inner)})`;
+    default: return "";
+  }
+}
+
+// AST → human-readable linear text (chips, copy): 2/3 not ((2)/(3)), × − ÷ glyphs.
+const TEXT_GLYPH = { "*": "×", "-": "−", ans: "Ans" };
+export function toText(n) {
+  if (!n) return "";
+  // parenthesize a slot unless it is a single node or a plain number (2.5)
+  const plain = (seq) => seq.children.length <= 1 || seq.children.every((c) => c.type === "char" && /^[0-9.]$/.test(c.value));
+  const group = (seq) => (plain(seq) ? toText(seq) : `(${toText(seq)})`);
+  switch (n.type) {
+    case "char": return TEXT_GLYPH[n.value] ?? n.value;
+    case "seq": return n.children.map(toText).join("");
+    case "frac": return `${group(n.num)}/${group(n.den)}`;
+    case "sup": return `^${group(n.exp)}`;
+    case "sqrt": return `√${group(n.rad)}`;
+    case "func": return `${n.name}(${toText(n.arg)})`;
+    case "paren": return `(${toText(n.inner)})`;
     default: return "";
   }
 }
@@ -72,7 +103,7 @@ export function findSeq(node, id) {
   switch (node.type) {
     case "seq": for (const c of node.children) { const r = findSeq(c, id); if (r) return r; } return null;
     case "frac": return findSeq(node.num, id) || findSeq(node.den, id);
-    case "sup": return findSeq(node.base, id) || findSeq(node.exp, id);
+    case "sup": return findSeq(node.exp, id);
     case "sqrt": return findSeq(node.rad, id);
     case "func": return findSeq(node.arg, id);
     case "paren": return findSeq(node.inner, id);
@@ -80,8 +111,24 @@ export function findSeq(node, id) {
   }
 }
 
-// Slot (child-seq) names for each structural node type.
-const NODE_SLOTS = { frac: ["num", "den"], sup: ["base", "exp"], sqrt: ["rad"], func: ["arg"], paren: ["inner"] };
+// Slot (child-seq) names for each structural node type, in reading order.
+export const NODE_SLOTS = { frac: ["num", "den"], sup: ["exp"], sqrt: ["rad"], func: ["arg"], paren: ["inner"] };
+
+// The slot seqs of a structural node, in reading order ([] for a char).
+export function slotsOf(node) {
+  const names = node && NODE_SLOTS[node.type];
+  return names ? names.map((s) => node[s]) : [];
+}
+
+// Deep copy with fresh ids, so a stored/recalled tree can never collide with
+// ids already live in the editor.
+export function cloneTree(node) {
+  if (!node) return node;
+  const copy = { ...node, id: nid() };
+  if (node.type === "seq") copy.children = node.children.map(cloneTree);
+  for (const s of NODE_SLOTS[node.type] || []) copy[s] = cloneTree(node[s]);
+  return copy;
+}
 
 // Find which seq contains the structural node owning the slot-seq `seqId`.
 // Returns { parentSeq, structIdx, structNode, slotName } or null.
@@ -111,14 +158,14 @@ function isNumericChar(node) {
   return node && node.type === "char" && /[0-9.]/.test(node.value);
 }
 // Is this node a binary/relational operator char (i.e. NOT an operand)?
-function isOperatorChar(node) {
+export function isOperatorChar(node) {
   return node && node.type === "char" && "+-*/^%=×÷−".includes(node.value);
 }
 
 // Extract the single operand immediately preceding `pos` in `seq`, removing it
-// from seq.children. "Operand" mirrors the exponent (sup) logic but is a little
-// smarter: a full numeric literal (run of digit/decimal chars), or a single
-// structural node (frac/sup/sqrt/func/paren) or constant/variable char. A
+// from seq.children. "Operand" = a full numeric literal (run of digit/decimal
+// chars), or a single structural node (frac/sqrt/func/paren) or constant/
+// variable char — plus any exponents trailing it (2³ is one operand). A
 // preceding operator (or nothing) yields no operand.
 //
 // Returns { nodes, start }:
@@ -126,12 +173,14 @@ function isOperatorChar(node) {
 //   start — the index where the operand began (= insertion point for callers)
 export function extractPrecedingOperand(seq, pos) {
   if (pos <= 0) return { nodes: [], start: pos };
-  const prev = seq.children[pos - 1];
-  if (isOperatorChar(prev)) return { nodes: [], start: pos };
-  let start = pos - 1;
-  if (isNumericChar(prev)) {
-    while (start > 0 && isNumericChar(seq.children[start - 1])) start--;
+  let start = pos;
+  while (start > 0 && seq.children[start - 1].type === "sup") start--;
+  const prev = seq.children[start - 1];
+  if (prev && !isOperatorChar(prev)) {
+    start--;
+    if (isNumericChar(prev)) while (start > 0 && isNumericChar(seq.children[start - 1])) start--;
   }
+  if (start === pos) return { nodes: [], start: pos };
   const nodes = seq.children.splice(start, pos - start);
   return { nodes, start };
 }

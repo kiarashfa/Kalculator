@@ -1,12 +1,11 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { math, mathFrac } from "./mathInstance.js";
 import { createMathEngine } from "./mathjsEngine.js";
 import { loadHistory, saveHistory } from "./historyDB.js";
 import { parseInBase, formatBases } from "./baseConvert.js";
-import {
-  mkSeq, mkChar, mkFrac, mkSup, mkSqrt, mkFunc, mkParen,
-  toExpr, findSeq, findParentOf, extractPrecedingOperand,
-} from "./mathAst.js";
+import { mkSeq, mkChar, toExpr, toText, cloneTree } from "./mathAst.js";
+import * as Ed from "./mathEdit.js";
+import MathView, { caretFromPoint } from "./MathView.jsx";
 
 // math.js-backed engine (eval/solve/graph) + a Fraction-mode instance for exact
 // results. Built once at module load.
@@ -45,121 +44,6 @@ const CURRENCY_DATA = {
 };
 // Hardcoded snapshot — NOT live. Update this label whenever the rates above change.
 const CURRENCY_RATES_DATE = "September 2026";
-
-// ─── Math Engine ─── math.js-backed (./mathjsEngine.js) + structural tree (./mathAst.js) ─
-
-
-// ─── Structural math tree ─── extracted to ./mathAst.js (Node-testable) ──────
-
-
-// ─── Math Render ────────────────────────────────────────────────────────────
-function MathRender({ node, fontSize, cursorSeqId, cursorPos, onTapSeq }) {
-  if (!node) return null;
-  const f = fontSize || 22;
-
-  if (node.type === "char") {
-    const isOp = "+-×÷*/%=".includes(node.value);
-    const isLetter = /^[a-zA-Zπ]/.test(node.value);
-    return (
-      <span style={{ fontSize: f, fontFamily: "'Space Grotesk',sans-serif", fontWeight: 500,
-        color: isOp ? "#f472b6" : isLetter ? "#60a5fa" : "#e8e8e8",
-        padding: "0 0.5px", lineHeight: 1.1
-      }}>
-        {node.value === "*" ? "×" : node.value}
-      </span>
-    );
-  }
-
-  if (node.type === "seq") {
-    const isEmpty = node.children.length === 0;
-    const isHere = cursorSeqId === node.id;
-    return (
-      <span
-        onClick={(e) => { e.stopPropagation(); onTapSeq(node.id, node.children.length); }}
-        style={{
-          display: "inline-flex", alignItems: "baseline", flexWrap: "wrap", cursor: "text",
-          minWidth: isEmpty ? Math.max(12, f * 0.5) : undefined,
-          minHeight: isEmpty ? f * 0.65 : undefined,
-          background: isEmpty ? "rgba(244,114,182,0.06)" : "transparent",
-          border: isEmpty ? "1px dashed rgba(244,114,182,0.15)" : "none",
-          borderRadius: 3, position: "relative", padding: isEmpty ? "0 2px" : 0,
-        }}
-      >
-        {isHere && cursorPos === 0 && <Cursor h={f * 0.85} />}
-        {node.children.map((child, i) => (
-          <span key={child.id} style={{ display: "inline-flex", alignItems: "baseline" }}
-            onClick={(e) => { e.stopPropagation(); onTapSeq(node.id, i + 1); }}>
-            <MathRender node={child} fontSize={f} cursorSeqId={cursorSeqId} cursorPos={cursorPos} onTapSeq={onTapSeq} />
-            {isHere && cursorPos === i + 1 && <Cursor h={f * 0.85} />}
-          </span>
-        ))}
-      </span>
-    );
-  }
-
-  if (node.type === "frac") {
-    return (
-      <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", verticalAlign: "middle", margin: "0 4px" }}>
-        <span style={{ display: "flex", justifyContent: "center", padding: "2px 6px", minWidth: 20 }}>
-          <MathRender node={node.num} fontSize={f * 0.78} cursorSeqId={cursorSeqId} cursorPos={cursorPos} onTapSeq={onTapSeq} />
-        </span>
-        <span style={{ width: "100%", minWidth: 20, height: 1.5, background: "#777", borderRadius: 1, margin: "2px 0" }} />
-        <span style={{ display: "flex", justifyContent: "center", padding: "2px 6px", minWidth: 20 }}>
-          <MathRender node={node.den} fontSize={f * 0.78} cursorSeqId={cursorSeqId} cursorPos={cursorPos} onTapSeq={onTapSeq} />
-        </span>
-      </span>
-    );
-  }
-
-  if (node.type === "sup") {
-    return (
-      <span style={{ display: "inline-flex", alignItems: "flex-start" }}>
-        <MathRender node={node.base} fontSize={f} cursorSeqId={cursorSeqId} cursorPos={cursorPos} onTapSeq={onTapSeq} />
-        <span style={{ marginTop: f * -0.4, marginLeft: 1 }}>
-          <MathRender node={node.exp} fontSize={f * 0.58} cursorSeqId={cursorSeqId} cursorPos={cursorPos} onTapSeq={onTapSeq} />
-        </span>
-      </span>
-    );
-  }
-
-  if (node.type === "sqrt") {
-    return (
-      <span style={{ display: "inline-flex", alignItems: "center", margin: "0 2px" }}>
-        <span style={{ color: "#888", fontSize: f * 1.15, fontFamily: "serif", lineHeight: 0.85, marginRight: -1 }}>√</span>
-        <span style={{ borderTop: "1.5px solid #888", display: "inline-flex", padding: "3px 4px 0", minWidth: 14 }}>
-          <MathRender node={node.rad} fontSize={f * 0.85} cursorSeqId={cursorSeqId} cursorPos={cursorPos} onTapSeq={onTapSeq} />
-        </span>
-      </span>
-    );
-  }
-
-  if (node.type === "func") {
-    return (
-      <span style={{ display: "inline-flex", alignItems: "center" }}>
-        <span style={{ color: "#34d399", fontSize: f * 0.75, fontFamily: "'DM Mono',monospace", fontWeight: 600, marginRight: 1 }}>{node.name}</span>
-        <span style={{ color: "#555", fontSize: f * 0.85 }}>(</span>
-        <MathRender node={node.arg} fontSize={f * 0.88} cursorSeqId={cursorSeqId} cursorPos={cursorPos} onTapSeq={onTapSeq} />
-        <span style={{ color: "#555", fontSize: f * 0.85 }}>)</span>
-      </span>
-    );
-  }
-
-  if (node.type === "paren") {
-    return (
-      <span style={{ display: "inline-flex", alignItems: "center" }}>
-        <span style={{ color: "#555", fontSize: f }}>( </span>
-        <MathRender node={node.inner} fontSize={f} cursorSeqId={cursorSeqId} cursorPos={cursorPos} onTapSeq={onTapSeq} />
-        <span style={{ color: "#555", fontSize: f }}> )</span>
-      </span>
-    );
-  }
-
-  return null;
-}
-
-function Cursor({ h }) {
-  return <span style={{ display: "inline-block", width: 2, height: h, background: "#f472b6", borderRadius: 1, marginLeft: 1, marginRight: 1, animation: "cursorBlink 1s infinite", flexShrink: 0 }} />;
-}
 
 
 // ─── Graph ──────────────────────────────────────────────────────────────────
@@ -239,26 +123,31 @@ function BasePanel() {
 // ─── Help / shortcuts overlay ───────────────────────────────────────────────
 function HelpOverlay({ onClose }) {
   const keys = [
-    ["Enter", "Evaluate ="], ["Backspace", "Delete"], ["/", "Fraction"], ["^", "Exponent"],
-    ["( )", "Group / exit"], ["!", "Factorial"], ["%", "Percent (÷100)"], ["x", "Variable (solve/graph)"], ["i", "Imaginary unit (calc)"],
+    ["Enter", "Evaluate ="], ["← → ↑ ↓", "Move the cursor (in & out of fractions)"], ["Home / End", "Start / end"],
+    ["Backspace / Del", "Delete"], ["Ctrl+Z / Ctrl+Y", "Undo / redo"], ["Esc", "Clear"],
+    ["/", "Fraction"], ["^", "Exponent"], ["( )", "Group · ) closes"], ["sin( sqrt( …", "Type function names"],
+    ["pi", "π"], ["!", "Factorial"], ["%", "Percent (÷100)"], ["x", "Variable (solve/graph)"], ["i", "Imaginary unit (calc)"],
   ];
   const tips = [
+    ["Tap / drag", "Place the cursor anywhere in the expression"],
+    ["◀ ▶", "Cursor keys on the keypad"],
+    ["ƒ", "Show / hide the function keys (phones)"],
     ["⇧", "Cycle keypad layers — basic → 2ⁿᵈ → ƒ (gcd, nCr, mean…)"],
-    ["STO", "Store the current value into A–M, then reuse it"],
+    ["Tap an entry", "Load a past expression back to edit it"],
     ["Tap a result", "Copies it to the clipboard"],
-    ["Fraction chip", "Toggle exact fraction ↔ decimal"],
-    ["∫ mode", "Numerical derivative (d/dx) & definite integral"],
-    ["BASE mode", "Convert between DEC / HEX / BIN / OCT"],
+    ["+ − × after =", "Continues from Ans"],
+    ["STO", "Store the current value into A–M, then reuse it"],
+    ["⚙", "Turn suggestions / live result on or off"],
   ];
   const Row = ([k, d]) => (
     <div key={k + d} style={{ display: "flex", gap: 12, alignItems: "baseline", padding: "5px 0" }}>
-      <span style={{ flex: "0 0 92px", textAlign: "right", color: "#f472b6", fontFamily: "'DM Mono',monospace", fontSize: 12, fontWeight: 600 }}>{k}</span>
+      <span style={{ flex: "0 0 112px", textAlign: "right", color: "#f472b6", fontFamily: "'DM Mono',monospace", fontSize: 12, fontWeight: 600 }}>{k}</span>
       <span style={{ color: "#bbb", fontSize: 12 }}>{d}</span>
     </div>
   );
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(5,5,8,0.7)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 360, maxHeight: "80%", overflowY: "auto", background: "#13131c", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 400, maxHeight: "85%", overflowY: "auto", background: "#13131c", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, padding: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <span style={{ color: "#eee", fontWeight: 700, fontSize: 15, fontFamily: "'Space Grotesk',sans-serif" }}>Shortcuts & tips</span>
           <button onClick={onClose} style={{ background: "rgba(244,114,182,0.15)", border: "1px solid rgba(244,114,182,0.3)", color: "#f472b6", borderRadius: 6, padding: "4px 12px", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>Close</button>
@@ -273,6 +162,72 @@ function HelpOverlay({ onClose }) {
 }
 
 
+// ─── Small UI pieces ────────────────────────────────────────────────────────
+const ICON_PATHS = {
+  left: "M15 18l-6-6 6-6",
+  right: "M9 18l6-6-6-6",
+  up: "M6 15l6-6 6 6",
+  undo: "M9 14L4 9l5-5M4 9h10.5a5.5 5.5 0 010 11H11",
+  redo: "M15 14l5-5-5-5M20 9H9.5a5.5 5.5 0 000 11H13",
+  trash: "M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3",
+  sliders: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
+  back: "M21 5H9l-7 7 7 7h12a1 1 0 001-1V6a1 1 0 00-1-1zM17 9.5l-5 5M12 9.5l5 5",
+};
+function Icon({ name, size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={ICON_PATHS[name]} />
+    </svg>
+  );
+}
+
+function SettingToggle({ on, onChange, label, hint }) {
+  return (
+    <button className="k-toggle" role="switch" aria-checked={on} onClick={() => onChange(!on)}>
+      <span>{label}{hint && <small>{hint}</small>}</span>
+      <span className={`k-switch${on ? " on" : ""}`} />
+    </button>
+  );
+}
+
+function useMedia(query) {
+  const [match, setMatch] = useState(() => typeof window !== "undefined" && !!window.matchMedia?.(query).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const onChange = () => setMatch(mq.matches);
+    onChange();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [query]);
+  return match;
+}
+
+// Per-viewer UI preferences (not calculation data) → localStorage.
+const SETTINGS_KEY = "kalculator.settings";
+const DEFAULT_SETTINGS = { suggest: true, preview: true, fnOpen: false };
+function loadSettings() {
+  try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") }; }
+  catch { return { ...DEFAULT_SETTINGS }; }
+}
+function saveSettings(s) {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* storage unavailable */ }
+}
+
+// Must match the wide-layout media query in styles/app.css.
+const WIDE_QUERY = "(min-width: 760px) and (orientation: landscape)";
+
+const MODES = [
+  { id: "calc", label: "CALC", color: "#f472b6", title: "Calculator" },
+  { id: "solve", label: "SOLVE", color: "#60a5fa", title: "Equation solver" },
+  { id: "graph", label: "GRAPH", color: "#34d399", title: "Graph f(x)" },
+  { id: "calculus", label: "∫dx", color: "#22d3ee", title: "Calculus: derivative & integral" },
+  { sep: true },
+  { id: "base", label: "BASE", color: "#fb923c", title: "Number bases (DEC/HEX/BIN/OCT)" },
+  { id: "units", label: "UNITS", color: "#fbbf24", title: "Unit converter" },
+  { id: "fx", label: "FX", color: "#a78bfa", title: "Currency converter" },
+];
+const MODE_COLOR = Object.fromEntries(MODES.filter((m) => m.id).map((m) => [m.id, m.color]));
+
 // Display labels for keypad values whose action name differs from the glyph we
 // want to show on the (narrow) 5-column keys. The action value itself is unchanged.
 const KEY_LABEL = {
@@ -280,18 +235,79 @@ const KEY_LABEL = {
   log2: "log₂", median: "med", variance: "var",
 };
 
+// Every function that becomes a structural func node — from the keypad or by
+// typing its name followed by "(". A new one also needs mathInstance.js.
+const FUNC_NAMES = [
+  "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", "tanh", "log", "ln", "log2", "abs", "exp", "cbrt",
+  "cot", "sec", "coth", "sech", "acot", "asec", "asinh", "acosh", "atanh", "acoth", "asech", // extended trig / hyperbolic
+  "gcd", "lcm", "min", "max", "nCr", "nPr", "mod", "logb",            // multi-arg (commas in the single arg seq)
+  "mean", "median", "std", "variance", "sum", "mode",                 // statistics (variadic; mode → array result)
+];
+// Keys that, pressed right after "=" on an empty line, continue from Ans.
+const CONTINUES_ANS = new Set(["+", "-", "*", "/", "^", "%", "!", "sq", "cube", "1/x"]);
+// Does a flat expression use the variable x (not the x inside "exp")?
+const usesX = (expr) => /(^|[^a-zA-Z])x([^a-zA-Z]|$)/.test(expr);
+// Results read with a true minus sign (display only; copying keeps ASCII).
+const prettyNum = (s) => String(s).replace(/(^|[\s(,=e])-/g, "$1−");
+
+// ─── History entry ──────────────────────────────────────────────────────────
+function HistoryEntry({ h, latest, copied, onRecall, onCopy, onToggleFraction }) {
+  const primary = h.fraction ? (h.showDecimal ? h.result : h.fraction) : h.result;
+  const canEdit = !!h.tree;
+  return (
+    <div className={`k-entry${latest ? " latest" : ""}`}>
+      <div className={`k-entry-expr${canEdit ? "" : " static"}`} onClick={canEdit ? onRecall : undefined} title={canEdit ? "Edit this expression" : undefined}>
+        {h.op?.kind === "int" && <span className="k-opnote">∫<sub>{h.op.a}</sub><sup>{h.op.b}</sup></span>}
+        {h.op?.kind === "d" && <span className="k-opnote">d/dx</span>}
+        {h.tree ? <MathView root={h.tree} /> : <span className="k-flat">{h.expr}</span>}
+        {h.op?.kind === "int" && <span className="k-opnote">dx</span>}
+        {h.op?.kind === "d" && <span className="k-opnote">at x = {h.op.a}</span>}
+      </div>
+      <div className="k-entry-res">
+        {h.solutions && h.solutions.length > 0 ? (
+          <div className="k-roots">
+            {h.solutions.map((s, k) => (
+              <span key={k} onClick={() => onCopy(s)} title="Tap to copy">
+                x{h.solutions.length > 1 && <sub>{k + 1}</sub>} = {prettyNum(s)}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <span
+            className={`k-res ${h.type}${copied ? " copied" : ""}`}
+            onClick={h.type === "calc" || h.type === "solve" ? () => onCopy(primary) : undefined}
+            title={h.type === "calc" ? "Tap to copy" : undefined}
+          >
+            {copied ? "copied ✓" : `${h.type === "calc" ? "= " : ""}${prettyNum(primary)}`}
+          </span>
+        )}
+        {h.fraction && (
+          <button className="k-fracchip" onClick={onToggleFraction} title="Toggle fraction / decimal">
+            {h.showDecimal ? h.fraction : h.result}
+          </button>
+        )}
+        {copied && h.solutions && <span className="k-note">copied ✓</span>}
+      </div>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════════════════
 export default function Kalculator() {
-  // Use refs for cursor so mutations always see current values
-  const [ast, setAst] = useState(() => mkSeq());
-  const [cursorSeqId, _setCursorSeqId] = useState(() => ast.id);
-  const [cursorPos, _setCursorPos] = useState(0);
-  const cursorRef = useRef({ seqId: ast.id, pos: 0 });
-
-  const setCursorSeqId = (id) => { cursorRef.current.seqId = id; _setCursorSeqId(id); };
-  const setCursorPos = (p) => { cursorRef.current.pos = p; _setCursorPos(p); };
+  // ── Editor state ──
+  // The tree is edited in place by the pure ops in mathEdit.js. Refs hold the
+  // source of truth (tree + caret) so several keys handled in one tick never
+  // act on a stale tree; `rev` only triggers the re-render.
+  const astRef = useRef(null);
+  if (!astRef.current) astRef.current = mkSeq();
+  const curRef = useRef(null);
+  if (!curRef.current) curRef.current = Ed.startOf(astRef.current);
+  const [rev, setRev] = useState(0);
+  const bump = () => setRev((r) => r + 1);
+  const undoRef = useRef({ past: [], future: [] });
+  const justEvalRef = useRef(false); // true right after "=" until the next edit
 
   const [history, setHistory] = useState([]);
   const [lastAns, setLastAns] = useState(0);
@@ -303,295 +319,368 @@ export default function Kalculator() {
   const [caB, setCaB] = useState("1"); // calculus mode: integral upper bound
   const [vars, setVars] = useState({}); // user variables: { A, B, C, D, M } → value (number|Complex)
   const [storeArmed, setStoreArmed] = useState(null); // STO snapshot {value, display} awaiting a slot
-  const [copiedIdx, setCopiedIdx] = useState(null); // history index showing a brief "copied ✓"
+  const [copiedKey, setCopiedKey] = useState(null); // history index showing a brief "copied ✓"
+  const [evalError, setEvalError] = useState(false); // "=" failed: keep the expression, say so
   const [showHelp, setShowHelp] = useState(false);
-  const [ver, setVer] = useState(0); // force re-render
-  const historyRef = useRef(null);
-  const containerRef = useRef(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settings, setSettings] = useState(loadSettings);
+  const wide = useMedia(WIDE_QUERY);
+  const scrollRef = useRef(null);
+  const editorRef = useRef(null);
   const persistedRef = useRef(false); // gate saving until the initial load settles
+
+  const ast = astRef.current;
+  const cur = curRef.current;
+  const isMath = mode === "calc" || mode === "solve" || mode === "graph" || mode === "calculus";
+  const setSetting = (k, v) => setSettings((s) => ({ ...s, [k]: v }));
+  const fnOpen = wide || settings.fnOpen;
+  const setFnOpen = (v) => setSetting("fnOpen", v);
+
+  useEffect(() => saveSettings(settings), [settings]);
 
   // Persist history across sessions (IndexedDB; no-ops where unavailable).
   useEffect(() => {
-    loadHistory().then(loaded => {
+    loadHistory().then((loaded) => {
       // only restore if the user hasn't already started computing (avoids a race)
-      setHistory(curr => (curr.length === 0 && loaded.length ? loaded : curr));
+      setHistory((curr) => (curr.length === 0 && loaded.length ? loaded : curr));
       persistedRef.current = true;
     });
   }, []);
   useEffect(() => { if (persistedRef.current) saveHistory(history); }, [history]);
+  useEffect(() => { const s = scrollRef.current; if (s) s.scrollTop = s.scrollHeight; }, [history.length, mode]);
+  // The display is bottom-anchored: when it shrinks (function panel opens,
+  // window resizes) keep the expression line in view instead of old history.
+  useEffect(() => {
+    const s = scrollRef.current;
+    if (!s || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => { s.scrollTop = s.scrollHeight; });
+    ro.observe(s);
+    return () => ro.disconnect();
+  }, [isMath]);
+  // keep the caret in view while typing / moving
+  useLayoutEffect(() => {
+    editorRef.current?.querySelector(".m-caret, .m-slot-on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [rev]);
 
-  const flatExpr = useMemo(() => toExpr(ast), [ast, ver]);
-  const suggestions = useMemo(() => {
-    if (mode !== "calc" && mode !== "solve" && mode !== "graph") return [];
-    return MathEngine.suggest(flatExpr);
-  }, [flatExpr, mode, ver]);
-
-  useEffect(() => { if (historyRef.current) historyRef.current.scrollTop = historyRef.current.scrollHeight; }, [history]);
-
-  // ── Core mutation: directly mutates `ast` then triggers re-render ──
-  function mutate(fn) {
-    fn(ast, cursorRef.current);
-    setAst({ ...ast }); // shallow copy to trigger re-render
-    setVer(v => v + 1);
+  // ── Edit plumbing ──
+  const snapshot = () => ({ tree: JSON.parse(JSON.stringify(astRef.current)), cur: { ...curRef.current } });
+  function record() {
+    const u = undoRef.current;
+    u.past.push(snapshot());
+    if (u.past.length > 200) u.past.shift();
+    u.future = [];
   }
-
-  function insertChar(ch) {
-    mutate((tree, cur) => {
-      const seq = findSeq(tree, cur.seqId);
-      if (!seq) return;
-      seq.children.splice(cur.pos, 0, mkChar(ch));
-      setCursorPos(cur.pos + 1);
-    });
+  // An editing op (undoable) — op(tree, caret) → caret, from mathEdit.js.
+  function edit(op) {
+    record();
+    curRef.current = op(astRef.current, curRef.current) || curRef.current;
+    justEvalRef.current = false;
+    setEvalError(false);
+    bump();
   }
-
-  function insertStructural(type, fnName) {
-    mutate((tree, cur) => {
-      const seq = findSeq(tree, cur.seqId);
-      if (!seq) return;
-
-      if (type === "frac") {
-        // Grab only the preceding operand as the numerator (was: the whole
-        // sequence before the cursor, so 1+2 ÷ wrongly gave (1+2)/▯).
-        const { nodes, start } = extractPrecedingOperand(seq, cur.pos);
-        const num = mkSeq(nodes);
-        const den = mkSeq();
-        const frac = mkFrac(num, den);
-        seq.children.splice(start, 0, frac);
-        if (nodes.length) {
-          setCursorSeqId(den.id); setCursorPos(0); // operand → numerator; fill denominator
-        } else {
-          setCursorSeqId(num.id); setCursorPos(0); // blank fraction; fill numerator first
-        }
-      } else if (type === "sup") {
-        const exp = mkSeq();
-        if (cur.pos > 0) {
-          const base = seq.children.splice(cur.pos - 1, 1)[0];
-          const sup = mkSup(mkSeq([base]), exp);
-          seq.children.splice(cur.pos - 1, 0, sup);
-        } else {
-          const sup = mkSup(mkSeq(), exp);
-          seq.children.splice(0, 0, sup);
-        }
-        setCursorSeqId(exp.id);
-        setCursorPos(0);
-      } else if (type === "sqrt") {
-        const rad = mkSeq();
-        seq.children.splice(cur.pos, 0, mkSqrt(rad));
-        setCursorSeqId(rad.id);
-        setCursorPos(0);
-      } else if (type === "func") {
-        const arg = mkSeq();
-        seq.children.splice(cur.pos, 0, mkFunc(fnName, arg));
-        setCursorSeqId(arg.id);
-        setCursorPos(0);
-      } else if (type === "paren") {
-        const inner = mkSeq();
-        seq.children.splice(cur.pos, 0, mkParen(inner));
-        setCursorSeqId(inner.id);
-        setCursorPos(0);
-      }
-    });
+  // A caret move (not undoable). Returns false when the op had nowhere to go.
+  function nav(op) {
+    const next = op(astRef.current, curRef.current);
+    if (!next) return false;
+    curRef.current = next;
+    bump();
+    return true;
   }
-
-  // Reciprocal (1/x button): wrap the preceding operand as the DENOMINATOR of a
-  // fraction with numerator 1 → a true 1/operand. (The old code built operand/1.)
-  function insertReciprocal() {
-    mutate((tree, cur) => {
-      const seq = findSeq(tree, cur.seqId);
-      if (!seq) return;
-      const { nodes, start } = extractPrecedingOperand(seq, cur.pos);
-      const frac = mkFrac(mkSeq([mkChar("1")]), mkSeq(nodes));
-      seq.children.splice(start, 0, frac);
-      if (nodes.length) {
-        // operand captured → reciprocal is complete; sit just after it
-        setCursorSeqId(seq.id);
-        setCursorPos(start + 1);
-      } else {
-        // nothing to reciprocate → drop the cursor into the empty denominator
-        setCursorSeqId(frac.den.id);
-        setCursorPos(0);
-      }
-    });
+  function setTree(tree, caret) {
+    record();
+    astRef.current = tree;
+    curRef.current = caret || Ed.endOf(tree);
+    justEvalRef.current = false;
+    setEvalError(false);
+    bump();
   }
-
-  // x² / x³ convenience: wrap the preceding operand as the base of a sup with a
-  // pre-filled exponent, then sit just after it (unlike ^, which opens an empty
-  // exponent box for you to type into).
-  function insertPow(nStr) {
-    mutate((tree, cur) => {
-      const seq = findSeq(tree, cur.seqId);
-      if (!seq) return;
-      const { nodes, start } = extractPrecedingOperand(seq, cur.pos);
-      const sup = mkSup(mkSeq(nodes), mkSeq([...nStr].map(mkChar)));
-      seq.children.splice(start, 0, sup);
-      if (nodes.length) { setCursorSeqId(seq.id); setCursorPos(start + 1); }
-      else { setCursorSeqId(sup.base.id); setCursorPos(0); }
-    });
+  function restore(from, to) {
+    const u = undoRef.current;
+    if (!u[from].length) return;
+    u[to].push(snapshot());
+    const s = u[from].pop();
+    astRef.current = s.tree;
+    curRef.current = s.cur;
+    setEvalError(false);
+    bump();
   }
-
-  function doBackspace() {
-    mutate((tree, cur) => {
-      const seq = findSeq(tree, cur.seqId);
-      if (!seq) return;
-
-      if (cur.pos > 0) {
-        const removed = seq.children[cur.pos - 1];
-        if (removed.type === "char") {
-          seq.children.splice(cur.pos - 1, 1);
-          setCursorPos(cur.pos - 1);
-        } else {
-          // Structural: unwrap children into seq
-          let inner = [];
-          if (removed.type === "frac") inner = [...removed.num.children, ...removed.den.children];
-          else if (removed.type === "sup") inner = [...removed.base.children, ...removed.exp.children];
-          else if (removed.type === "sqrt") inner = removed.rad.children;
-          else if (removed.type === "func") inner = removed.arg.children;
-          else if (removed.type === "paren") inner = removed.inner.children;
-          seq.children.splice(cur.pos - 1, 1, ...inner);
-          setCursorPos(cur.pos - 1 + inner.length);
-        }
-      } else {
-        // Navigate out
-        const info = findParentOf(tree, cur.seqId);
-        if (info) {
-          setCursorSeqId(info.parentSeq.id);
-          setCursorPos(info.structIdx);
-        }
-      }
-    });
-  }
-
-  function navigateOut() {
-    const info = findParentOf(ast, cursorRef.current.seqId);
-    if (info) {
-      setCursorSeqId(info.parentSeq.id);
-      setCursorPos(info.structIdx + 1);
-      setVer(v => v + 1);
-    }
-  }
+  const undo = () => restore("past", "future");
+  const redo = () => restore("future", "past");
 
   function clearAll() {
-    const s = mkSeq();
-    setAst(s);
-    setCursorSeqId(s.id);
-    setCursorPos(0);
-    setVer(v => v + 1);
+    if (astRef.current.children.length) setTree(mkSeq());
     setStoreArmed(null);
   }
 
+  // Load a past expression back into the editor (undoable).
+  function recall(h) {
+    if (!h?.tree) return;
+    setTree(cloneTree(h.tree));
+  }
+  function recallLast() {
+    if (astRef.current.children.length) return;
+    for (let i = history.length - 1; i >= 0; i--) if (history[i].tree) { recall(history[i]); return; }
+  }
+
+  // ── Evaluate ──
   function calculate() {
-    const expr = toExpr(ast);
+    const tree = astRef.current;
+    const expr = toExpr(tree);
     if (!expr.trim() || expr === "()") return;
+    const saved = cloneTree(tree);
+    let entry;
     if (mode === "solve") {
       const res = MathEngine.solve(expr);
-      setHistory(h => [...h, { expr, result: res.display, type: "solve" }]);
+      entry = { expr, tree: saved, result: res.display, solutions: res.kind === "roots" ? res.solutions : undefined, type: "solve" };
     } else if (mode === "graph") {
-      setGraphExprs(p => [...p, expr]);
+      setGraphExprs((p) => [...p, expr]);
       setShowGraph(true);
-      setHistory(h => [...h, { expr, result: "Plotted ✓", type: "graph" }]);
+      entry = { expr, tree: saved, result: "Plotted ✓", type: "graph" };
     } else if (mode === "calculus") {
       // = performs the definite integral; the d/dx button does the derivative
       const a = parseFloat(caA), b = parseFloat(caB);
-      if (isNaN(a) || isNaN(b)) { setHistory(h => [...h, { expr, result: "Need numeric a, b", type: "error" }]); }
-      else { const r = MathEngine.numIntegral(expr, a, b); setHistory(h => [...h, { expr: `∫[${caA},${caB}] (${expr}) dx`, result: r === null ? "Error" : MathEngine.fmt(r), type: r === null ? "error" : "calc" }]); }
+      if (isNaN(a) || isNaN(b)) { setEvalError("Integral bounds a and b must be numbers"); return; }
+      const r = MathEngine.numIntegral(expr, a, b);
+      if (r === null) { setEvalError("Can't integrate this — check f(x)"); return; }
+      entry = { expr: `∫[${caA},${caB}] (${expr}) dx`, tree: saved, op: { kind: "int", a: caA, b: caB }, result: MathEngine.fmt(r), type: "calc" };
     } else {
-      const res = MathEngine.evalRich(expr, { ans: lastAns, ...vars });
+      const scope = { ans: lastAns, ...vars };
+      const res = MathEngine.evalRich(expr, scope);
       if (res.kind === "real") {
         setLastAns(res.value);
-        const fraction = MathEngine.exactFraction(expr, { ans: lastAns, ...vars }); // "1/2" or null
-        setHistory(h => [...h, { expr, result: res.display, fraction, type: "calc" }]);
+        entry = { expr, tree: saved, result: res.display, fraction: MathEngine.exactFraction(expr, scope), type: "calc" };
       } else if (res.kind === "complex") {
         setLastAns(res.value); // complex ans is reusable (math.js handles it)
-        setHistory(h => [...h, { expr, result: res.display, type: "calc" }]);
+        entry = { expr, tree: saved, result: res.display, type: "calc" };
       } else if (res.kind === "infinite" || res.kind === "undefined") {
-        setHistory(h => [...h, { expr, result: res.display, type: "error" }]); // ∞ / Undefined, no ans
+        entry = { expr, tree: saved, result: res.display, type: "error" }; // ∞ / Undefined, no ans
       } else {
-        setHistory(h => [...h, { expr, result: "Error", type: "error" }]);
+        // Keep the expression so it can be fixed — nothing is lost on a typo.
+        setEvalError("Can't evaluate this — check the expression");
+        return;
       }
     }
-    clearAll();
+    setHistory((h) => [...h, entry]);
+    setTree(mkSeq()); // undoable: Ctrl+Z brings the expression back
+    justEvalRef.current = true;
+    setStoreArmed(null);
   }
 
   // Calculus mode: numerical derivative of f(x) at x = a (the ∫ button / "=" do the integral).
   function doDerivative() {
-    const expr = toExpr(ast);
+    const expr = toExpr(astRef.current);
     if (!expr.trim() || expr === "()") return;
     const a = parseFloat(caA);
-    if (isNaN(a)) { setHistory(h => [...h, { expr, result: "Need numeric a", type: "error" }]); return; }
+    if (isNaN(a)) { setEvalError("Point a must be a number"); return; }
     const r = MathEngine.numDerivative(expr, a);
-    setHistory(h => [...h, { expr: `d/dx (${expr}) @ x=${caA}`, result: r === null ? "Error" : MathEngine.fmt(r), type: r === null ? "error" : "calc" }]);
-    clearAll();
+    if (r === null) { setEvalError("Can't differentiate this — check f(x)"); return; }
+    const entry = { expr: `d/dx (${expr}) @ x=${caA}`, tree: cloneTree(astRef.current), op: { kind: "d", a: caA }, result: MathEngine.fmt(r), type: "calc" };
+    setHistory((h) => [...h, entry]); // entry built eagerly: setTree below replaces the tree
+    setTree(mkSeq());
+    justEvalRef.current = true;
   }
 
-  function pressKey(val) {
-    if (val === "=") { calculate(); return; }
-    if (val === "AC") { clearAll(); return; }
-    if (val === "⌫") { doBackspace(); return; }
-    if (val === "ANS") { insertChar("ans"); return; }
-    if (val === "/") { insertStructural("frac"); return; }
-    if (val === "^") { insertStructural("sup"); return; }
-    if (val === "sqrt" || val === "cbrt") { if (val === "sqrt") insertStructural("sqrt"); else insertStructural("func", "cbrt"); return; }
-    if (val === "(") { insertStructural("paren"); return; }
-    if (val === ")") { navigateOut(); return; }
-    const funcNames = ["sin","cos","tan","asin","acos","atan","sinh","cosh","tanh","log","ln","log2","abs","exp",
-      "cot","sec","coth","sech","acot","asec","asinh","acosh","atanh","acoth","asech", // extended trig / hyperbolic
-      "gcd","lcm","min","max","nCr","nPr","mod","logb",            // multi-arg (commas in the single arg seq)
-      "mean","median","std","variance","sum","mode"];               // statistics (variadic; mode → array result)
-    if (funcNames.includes(val)) { insertStructural("func", val); return; }
-    insertChar(val);
+  // ── Keys ──
+  function pressKey(k) {
+    switch (k) {
+      case "=": calculate(); return;
+      case "AC": clearAll(); return;
+      case "⌫": edit(Ed.backspace); return;
+      case "◀": nav(Ed.moveLeft); return;
+      case "▶": nav(Ed.moveRight); return;
+      case "ANS": edit((t, c) => Ed.insertChar(t, c, "ans")); return;
+      case "(": edit((t, c) => Ed.openParen(t, c, FUNC_NAMES)); return;
+      case ")": nav(Ed.closeParen); return;
+      default: break;
+    }
+    const fromAns = justEvalRef.current && mode === "calc" && CONTINUES_ANS.has(k) && astRef.current.children.length === 0;
+    edit((t, c) => {
+      if (fromAns) { t.children.push(mkChar("ans")); c = Ed.endOf(t); }
+      if (k === "/") return Ed.insertStruct(t, c, "frac");
+      if (k === "^") return Ed.insertExponent(t, c, null);
+      if (k === "sq") return Ed.insertExponent(t, c, "2");
+      if (k === "cube") return Ed.insertExponent(t, c, "3");
+      if (k === "1/x") return Ed.insertReciprocal(t, c);
+      if (k === "sqrt") return Ed.insertStruct(t, c, "sqrt");
+      if (FUNC_NAMES.includes(k)) return Ed.insertStruct(t, c, "func", k);
+      return Ed.insertChar(t, c, k);
+    });
   }
 
-  const handleKeyDown = (e) => {
-    if (mode !== "calc" && mode !== "solve" && mode !== "graph" && mode !== "calculus") return;
-    const key = e.key;
-    if (key === "Enter") { e.preventDefault(); calculate(); return; }
-    if (key === "Backspace") { e.preventDefault(); doBackspace(); return; }
-    if (key === "/") { e.preventDefault(); insertStructural("frac"); return; }
-    if (key === "^") { e.preventDefault(); insertStructural("sup"); return; }
-    if (key === "(") { e.preventDefault(); insertStructural("paren"); return; }
-    if (key === ")") { e.preventDefault(); navigateOut(); return; }
-    // Store ASCII operators in the AST; the renderer maps * → × for display.
-    // (Storing the × glyph here was the bug: tokenize had no branch for it and
-    // silently dropped the char, so 2*3 became 23.)
-    if (/^[0-9.+\-*%!=xi,]$/.test(key)) { e.preventDefault(); insertChar(key); return; }
+  // Physical keyboard, captured app-wide (no need to click the display first).
+  const keyHandlerRef = useRef(null);
+  keyHandlerRef.current = (e) => {
+    const k = e.key;
+    if (showHelp || showGraph) {
+      if (k === "Escape") { setShowHelp(false); setShowGraph(false); }
+      return;
+    }
+    if (showSettings && k === "Escape") { setShowSettings(false); return; }
+    if (!isMath) return;
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+    if (t && t.tagName === "BUTTON" && (k === "Enter" || k === " ")) return; // keyboard-focused button: let it click
+    if (e.ctrlKey || e.metaKey) {
+      const lk = k.toLowerCase();
+      if (lk === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
+      else if (lk === "y") { e.preventDefault(); redo(); }
+      return; // copy / paste / reload … stay with the browser
+    }
+    if (e.altKey) return;
+    let handled = true;
+    switch (k) {
+      case "Enter": calculate(); break;
+      case "Backspace": edit(Ed.backspace); break;
+      case "Delete": edit(Ed.deleteForward); break;
+      case "Escape": clearAll(); break;
+      case "ArrowLeft": nav(Ed.moveLeft); break;
+      case "ArrowRight": nav(Ed.moveRight); break;
+      case "ArrowUp": if (!nav(Ed.moveUp)) recallLast(); break;
+      case "ArrowDown": nav(Ed.moveDown); break;
+      case "Home": nav(Ed.moveHome); break;
+      case "End": nav(Ed.moveEnd); break;
+      case "Tab": // leave a fraction/exponent; at top level Tab keeps its focus role
+        if (curRef.current.seqId !== astRef.current.id) nav(Ed.exitRight); else handled = false;
+        break;
+      default:
+        if (k.length !== 1) { handled = false; break; }
+        if (/^[a-zA-Z]$/.test(k)) edit((tr, c) => Ed.typeChar(tr, c, k));
+        else if (k === "=") edit((tr, c) => Ed.insertChar(tr, c, "=")); // equations (solve); Enter evaluates
+        else if (/^[0-9.+\-*/^%!,()π]$/.test(k)) pressKey(k);
+        else handled = false;
+    }
+    if (handled) e.preventDefault();
   };
+  const clipRef = useRef(null);
+  clipRef.current = (e) => {
+    if (!isMath || showHelp || showGraph) return;
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+    if (e.type === "paste") {
+      const text = e.clipboardData?.getData("text");
+      if (!text) return;
+      e.preventDefault();
+      edit((tr, c) => Ed.insertText(tr, c, text));
+    } else if (e.type === "copy" && window.getSelection()?.isCollapsed !== false && astRef.current.children.length) {
+      e.preventDefault(); // nothing selected: copy the expression as text
+      e.clipboardData?.setData("text/plain", toText(astRef.current));
+    }
+  };
+  useEffect(() => {
+    const onKey = (e) => keyHandlerRef.current(e);
+    const onClip = (e) => clipRef.current(e);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("paste", onClip);
+    window.addEventListener("copy", onClip);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("paste", onClip);
+      window.removeEventListener("copy", onClip);
+    };
+  }, []);
 
-  const onTapSeq = (id, pos) => { setCursorSeqId(id); setCursorPos(pos); setVer(v => v + 1); };
+  // ── Pointer: tap / drag places the caret ──
+  const dragRef = useRef(false);
+  function placeCaret(e) {
+    const c = caretFromPoint(editorRef.current, e.clientX, e.clientY);
+    if (c && (c.seqId !== curRef.current.seqId || c.pos !== curRef.current.pos)) { curRef.current = c; bump(); }
+  }
+  const onEditorPointerDown = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault(); // no text selection / focus jump
+    dragRef.current = true;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    placeCaret(e);
+  };
+  const onEditorPointerMove = (e) => { if (dragRef.current) placeCaret(e); };
+  const onEditorPointerUp = () => { dragRef.current = false; };
 
   // Toggle a history result between its exact fraction and decimal forms.
-  const toggleDecimal = (i) => setHistory(h => h.map((e, idx) => idx === i ? { ...e, showDecimal: !e.showDecimal } : e));
+  const toggleDecimal = (i) => setHistory((h) => h.map((e, idx) => (idx === i ? { ...e, showDecimal: !e.showDecimal } : e)));
+  function copyText(key, text) {
+    try { navigator.clipboard?.writeText(text); } catch { /* unavailable */ }
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey((c) => (c === key ? null : c)), 1200);
+  }
 
-  // ── Variables (STO) ──────────────────────────────────────────────────────
+  // ── Variables (STO) ──
   // STO snapshots the current expression's value; the next slot tap stores it.
   function armStore() {
     if (storeArmed) { setStoreArmed(null); return; } // toggle off
-    const expr = toExpr(ast);
+    const expr = toExpr(astRef.current);
     if (!expr.trim() || expr === "()") return;
     const res = MathEngine.evalRich(expr, { ans: lastAns, ...vars });
     if (res.kind === "real" || res.kind === "complex") setStoreArmed({ value: res.value, display: res.display });
   }
   function onVar(name) {
     if (storeArmed) {
-      setVars(v => ({ ...v, [name]: storeArmed.value }));
-      setHistory(h => [...h, { expr: `${name} =`, result: storeArmed.display, type: "calc" }]);
+      setVars((v) => ({ ...v, [name]: storeArmed.value }));
+      setHistory((h) => [...h, { expr: `STO → ${name}`, result: storeArmed.display, type: "calc" }]);
       setStoreArmed(null);
       clearAll();
     } else {
-      insertChar(name); // recall: use the variable in the expression
+      pressKey(name); // recall: use the variable in the expression
     }
   }
 
-  // Copy a history result to the clipboard (tap the value).
-  function copyResult(i, text) {
-    try { navigator.clipboard?.writeText(text); } catch { /* unavailable */ }
-    setCopiedIdx(i);
-    setTimeout(() => setCopiedIdx(c => (c === i ? null : c)), 1200);
+  function switchMode(m) {
+    setMode(m);
+    setShowSettings(false);
+    setEvalError(false);
   }
 
-  const modeColors = { calc:{bg:"#f472b6",label:"CALC"}, solve:{bg:"#60a5fa",label:"SOLVE"}, graph:{bg:"#34d399",label:"GRAPH"}, calculus:{bg:"#22d3ee",label:"∫"}, base:{bg:"#fb923c",label:"BASE"}, units:{bg:"#fbbf24",label:"UNITS"}, fx:{bg:"#a78bfa",label:"FX"} };
-  const showCalcUI = mode === "calc" || mode === "solve" || mode === "graph" || mode === "calculus";
-  const isAstEmpty = ast.children.length === 0;
+  // ── Derived display state ──
+  const flatExpr = useMemo(() => toExpr(ast), [ast, rev]);
+  const scope = useMemo(() => ({ ans: lastAns, ...vars }), [lastAns, vars]);
+  const isEmpty = ast.children.length === 0;
 
+  const preview = useMemo(() => {
+    if (evalError) return { text: evalError, cls: "err" };
+    if (!flatExpr) return null;
+    if (mode === "calc") {
+      if (!settings.preview || /^-?[0-9.]+$/.test(flatExpr)) return null; // a bare number previews itself
+      const r = MathEngine.evalRich(flatExpr, scope);
+      return r.kind === "real" || r.kind === "complex" || r.kind === "infinite" || r.kind === "undefined"
+        ? { text: `= ${prettyNum(r.display)}` } : null;
+    }
+    if (mode === "solve") return { text: usesX(flatExpr) ? "Press = to solve for x" : "Use x for the unknown", cls: "hint" };
+    if (mode === "graph") return { text: "Press = to plot f(x)", cls: "hint" };
+    if (mode === "calculus") return { text: `= → ∫ from ${caA} to ${caB}  ·  d/dx → slope at x = ${caA}`, cls: "hint" };
+    return null;
+  }, [flatExpr, mode, settings.preview, scope, evalError, caA, caB]);
+
+  const suggestions = useMemo(() => {
+    if (!settings.suggest || !flatExpr || !(mode === "calc" || mode === "solve" || mode === "graph")) return [];
+    const out = [];
+    if (mode === "calc") {
+      // HandyCalc-style: the value of the sub-expression the caret is in
+      const sub = Ed.enclosingNode(ast, cur);
+      if (sub) {
+        const se = toExpr(sub);
+        const v = se !== flatExpr ? MathEngine.evalRich(se, scope) : null;
+        if (v && v.kind === "real") out.push({ key: "sub", label: `${toText(sub)} = ${v.display}`, info: true });
+      }
+      if (!settings.preview) {
+        const r = MathEngine.evalRich(flatExpr, scope);
+        if (r.kind === "real") out.push({ key: "eval", label: `= ${r.display}`, hot: true, run: calculate });
+      }
+      const frac = MathEngine.exactFraction(flatExpr, scope);
+      if (frac) out.push({ key: "frac", label: `= ${frac}`, info: true });
+      if (usesX(flatExpr)) {
+        out.push({ key: "solve", label: "Solve for x →", hot: true, run: () => switchMode("solve") });
+        out.push({ key: "graph", label: "Graph it →", run: () => switchMode("graph") });
+      }
+    }
+    for (const s of MathEngine.suggest(flatExpr)) {
+      if (s.action === "eval") continue;
+      const fn = s.action.slice(0, s.action.indexOf("("));
+      out.push({ key: fn, label: s.label, run: () => edit((t) => Ed.wrapAll(t, fn)) });
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flatExpr, rev, mode, settings.suggest, settings.preview, scope]);
+
+  // ── Keypad model ──
   // CALC mode shows the imaginary unit `i`; SOLVE/GRAPH show the variable `x`.
   const xi = mode === "calc" ? "i" : "x";
   const layouts = [
@@ -599,175 +688,204 @@ export default function Kalculator() {
     [["gcd","lcm","nCr","nPr","mod"],["abs","min","max","sum","mean"],["mode","median","std","variance",","],["⇧",xi,"π","(",")"]],
     [["asin","acos","atan","acot","asec"],["sinh","cosh","tanh","coth","sech"],["asinh","acosh","atanh","acoth","asech"],["⇧",xi,"π","(",")"]],
   ];
-  const mainKeys = layouts[layer];
+  const fnRows = layouts[layer].slice(0, 3);
+  const baseRow = layouts[layer][3];
   const numKeys = [["7","8","9","÷","^"],["4","5","6","×","%"],["1","2","3","−","!"],["0",".","=","+","E"]];
-  const keyMap = {"÷":"/","×":"*","−":"-","⇧":null};
-
-  const handleBtnPress = (k) => {
-    if (k === "1/x") { insertReciprocal(); return; }
-    if (k === "sq") { insertPow("2"); return; }
-    if (k === "cube") { insertPow("3"); return; }
-    const mapped = keyMap[k] !== undefined ? keyMap[k] : k;
-    if (mapped !== null) pressKey(mapped);
-  };
+  const keyMap = { "÷": "/", "×": "*", "−": "-" };
+  const keyClass = (k) =>
+    k === "=" ? "kk kk-eq"
+    : "÷×−+^%!".includes(k) ? "kk kk-op"
+    : /^[0-9.]$/.test(k) ? "kk kk-num"
+    : k === "sqrt" || k === "cbrt" ? "kk kk-root"
+    : "kk kk-fn";
+  const onKeyBtn = (k) => pressKey(keyMap[k] ?? k);
 
   // ⇧ cycles keypad layers. Tap toggles basic ↔ 2nd (a tap while on 3rd returns
-  // to basic); a long-press jumps to the rarely-used 3rd layer.
+  // to basic); a long-press jumps to the rarely-used 3rd layer. With the
+  // function panel folded away (phones), ⇧ first unfolds it.
   const shiftHold = useRef({ t: null, long: false });
-  const shiftDown = (e) => { e.preventDefault(); shiftHold.current.long = false; shiftHold.current.t = setTimeout(() => { shiftHold.current.long = true; setLayer(2); }, 450); };
-  const shiftUp = () => { clearTimeout(shiftHold.current.t); if (!shiftHold.current.long) setLayer(l => (l === 0 ? 1 : 0)); };
+  const shiftDown = (e) => { e.preventDefault(); shiftHold.current.long = false; shiftHold.current.t = setTimeout(() => { shiftHold.current.long = true; setLayer(2); setFnOpen(true); }, 450); };
+  const shiftUp = () => {
+    clearTimeout(shiftHold.current.t);
+    if (shiftHold.current.long) return;
+    if (!fnOpen) { setFnOpen(true); return; }
+    setLayer((l) => (l === 0 ? 1 : 0));
+  };
   const shiftCancel = () => { clearTimeout(shiftHold.current.t); };
 
-  const getKeyStyle = (k) => {
-    const base = { border:"none",borderRadius:10,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:15,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",transition:"all 0.1s",padding:0,minHeight:46 };
-    if (k==="=") return{...base,background:"linear-gradient(135deg,#f472b6,#ec4899)",color:"#fff",fontSize:20};
-    if ("÷×−+^%!".includes(k)) return{...base,background:"rgba(244,114,182,0.12)",color:"#f472b6",border:"1px solid rgba(244,114,182,0.15)"};
-    if (k==="⇧") return{...base,fontSize:13,background:layer?"rgba(96,165,250,0.2)":"rgba(255,255,255,0.06)",color:layer?"#60a5fa":"#aaa",border:layer?"1px solid rgba(96,165,250,0.3)":"1px solid rgba(255,255,255,0.08)"};
-    if (/^[0-9.]$/.test(k)) return{...base,background:"rgba(255,255,255,0.08)",color:"#fff",border:"1px solid rgba(255,255,255,0.06)"};
-    if (k==="sqrt"||k==="cbrt") return{...base,background:"rgba(255,255,255,0.04)",color:"#ddd",fontSize:16,fontFamily:"Cambria,Georgia,'Times New Roman',serif",border:"1px solid rgba(255,255,255,0.06)"};
-    return{...base,background:"rgba(255,255,255,0.04)",color:"#ccc",fontSize:12,border:"1px solid rgba(255,255,255,0.06)"};
+  // Swipe up / down on the keypad's top row folds the function panel (phones).
+  const swipeRef = useRef(null);
+  const onToolsPointerDown = (e) => { swipeRef.current = { y: e.clientY, moved: false }; };
+  const onToolsPointerMove = (e) => {
+    const s = swipeRef.current;
+    if (!s || s.moved || wide) return;
+    const dy = e.clientY - s.y;
+    if (Math.abs(dy) > 24) { s.moved = true; setFnOpen(dy < 0); }
   };
+  const onToolsPointerUp = () => { setTimeout(() => { swipeRef.current = null; }, 0); };
+  const tool = (fn) => () => { if (!swipeRef.current?.moved) fn(); };
+
+  const accent = MODE_COLOR[mode] || "#f472b6";
+  const undoState = undoRef.current;
+  const lastIdx = history.length - 1;
+  const placeholder = mode === "solve" ? "x² − 4 = 0" : mode === "graph" || mode === "calculus" ? "f(x)" : "0";
 
   return (
-    <div ref={containerRef} tabIndex={0} onKeyDown={handleKeyDown} className="kalc-root"
-      style={{ width:"100%",maxWidth:420,margin:"0 auto",display:"flex",flexDirection:"column",background:"#0a0a0f",color:"#fff",fontFamily:"'DM Mono',monospace",overflow:"hidden",outline:"none" }}>
-      {showGraph && <GraphView expressions={graphExprs} onClose={()=>setShowGraph(false)} />}
-      {showHelp && <HelpOverlay onClose={()=>setShowHelp(false)} />}
+    <div className="k-app" style={{ "--accent": accent }}
+      onMouseDown={(e) => { if (e.target.closest?.("button")) e.preventDefault(); /* keys never steal focus */ }}>
+      {showGraph && <GraphView expressions={graphExprs} onClose={() => setShowGraph(false)} />}
+      {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
 
-      {/* Header */}
-      <div style={{padding:"12px 16px 8px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
+      {/* Header: brand · mode switcher · settings/help */}
+      <header className="k-header">
+        <div className="k-brand">
           {/* The brand mark is the favicon itself (public/icons/favicon.svg), served
               through BASE_URL so it resolves under the GitHub Pages sub-path. */}
-          <img src={`${import.meta.env.BASE_URL}icons/favicon.svg`} alt="" width={28} height={28} style={{display:"block"}} />
-          <span style={{fontSize:14,fontWeight:600,color:"#eee",fontFamily:"'Space Grotesk',sans-serif"}}>Kalculator</span>
-          <button onClick={()=>setShowHelp(true)} title="Shortcuts & tips" style={{width:18,height:18,borderRadius:"50%",border:"1px solid rgba(255,255,255,0.15)",background:"transparent",color:"#888",fontSize:11,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1,padding:0}}>?</button>
+          <img src={`${import.meta.env.BASE_URL}icons/favicon.svg`} alt="" width={28} height={28} />
+          <span className="k-brand-name">Kalculator</span>
         </div>
-        <div style={{display:"flex",gap:3,flexWrap:"wrap",justifyContent:"flex-end"}}>
-          {Object.entries(modeColors).map(([m,c])=>(
-            <button key={m} onClick={()=>{setMode(m);setTimeout(()=>containerRef.current?.focus(),50);}} style={{padding:"4px 7px",borderRadius:6,fontSize:9,fontWeight:600,fontFamily:"'DM Mono',monospace",cursor:"pointer",transition:"all 0.2s",border:mode===m?`1px solid ${c.bg}`:"1px solid rgba(255,255,255,0.08)",background:mode===m?`${c.bg}22`:"transparent",color:mode===m?c.bg:"#555"}}>{c.label}</button>
-          ))}
+        <nav className="k-modes" aria-label="Mode">
+          {MODES.map((m, i) => m.sep
+            ? <span key={`sep${i}`} className="k-modes-sep" aria-hidden="true" />
+            : <button key={m.id} className={`k-mode${mode === m.id ? " on" : ""}`} style={{ "--c": m.color }}
+                aria-pressed={mode === m.id} title={m.title} onClick={() => switchMode(m.id)}>{m.label}</button>
+          )}
+        </nav>
+        <div className="k-actions">
+          <button className="k-iconbtn" title="Settings" aria-expanded={showSettings} onClick={() => setShowSettings((s) => !s)}><Icon name="sliders" /></button>
+          <button className="k-iconbtn" title="Shortcuts & tips" onClick={() => setShowHelp(true)}>?</button>
         </div>
-      </div>
+      </header>
 
-      {showCalcUI ? (<>
-        {/* History */}
-        <div ref={historyRef} style={{flex:1,overflowY:"auto",padding:"12px 16px",display:"flex",flexDirection:"column",gap:6,minHeight:0}}>
-          {history.length>0 && (
-            <div style={{position:"sticky",top:0,zIndex:1,display:"flex",justifyContent:"flex-end",marginBottom:-2}}>
-              <button onClick={()=>setHistory([])} title="Clear history"
-                style={{fontSize:10,fontFamily:"'DM Mono',monospace",background:"rgba(10,10,15,0.85)",border:"1px solid rgba(255,255,255,0.08)",color:"#666",borderRadius:6,padding:"2px 8px",cursor:"pointer",backdropFilter:"blur(4px)"}}>clear</button>
+      {showSettings && (
+        <>
+          <div style={{ position: "fixed", inset: 0, zIndex: 55 }} onClick={() => setShowSettings(false)} />
+          <div className="k-pop" role="dialog" aria-label="Settings">
+            <div className="k-pop-title">Display</div>
+            <SettingToggle on={settings.suggest} onChange={(v) => setSetting("suggest", v)} label="Suggestions" hint="Hint chips under the expression" />
+            <SettingToggle on={settings.preview} onChange={(v) => setSetting("preview", v)} label="Live result" hint="Show the answer as you type" />
+          </div>
+        </>
+      )}
+
+      {isMath ? (
+        <main className="k-main">
+          {/* ── Display ── */}
+          <section className="k-display">
+            <div className="k-disp-tools">
+              <button className="k-mini" title="Undo (Ctrl+Z)" disabled={!undoState.past.length} onClick={undo}><Icon name="undo" size={14} /></button>
+              <button className="k-mini" title="Redo (Ctrl+Y)" disabled={!undoState.future.length} onClick={redo}><Icon name="redo" size={14} /></button>
+              {history.length > 0 && <button className="k-mini" title="Clear history" onClick={() => setHistory([])}><Icon name="trash" size={14} /></button>}
             </div>
-          )}
-          {history.length===0 && isAstEmpty && (
-            <div style={{textAlign:"center",color:"#333",padding:"30px 20px",fontSize:12,lineHeight:1.8}}>
-              <div style={{fontSize:32,marginBottom:12,opacity:0.3}}>∑</div>
-              <div style={{color:"#555"}}>Type an expression to get started</div>
-              <div style={{color:"#444",marginTop:4}}>
-                {mode==="solve"?"Enter equation with x · fractions render naturally":mode==="graph"?"Enter f(x) · e.g. sin(x) or x²":"Press ÷ for fractions · ^ for exponents · √ for roots"}
-              </div>
-            </div>
-          )}
-          {history.map((h,i)=>{
-            const primary = h.fraction ? (h.showDecimal ? h.result : h.fraction) : h.result;
-            return (
-            <div key={i} style={{display:"flex",flexDirection:"column",gap:2,animation:"fadeIn 0.2s ease-out"}}>
-              <div style={{fontSize:11,color:"#555",textAlign:"right",wordBreak:"break-all"}}>{h.expr}</div>
-              <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:8,flexWrap:"wrap"}}>
-                {h.fraction && (
-                  <button onClick={(e)=>{e.stopPropagation();toggleDecimal(i);}} title="Toggle fraction / decimal"
-                    style={{fontSize:11,fontFamily:"'DM Mono',monospace",background:"rgba(244,114,182,0.1)",border:"1px solid rgba(244,114,182,0.2)",color:"#f472b6",borderRadius:6,padding:"3px 8px",cursor:"pointer",fontWeight:600,whiteSpace:"nowrap"}}>
-                    {h.showDecimal ? h.fraction : h.result}
-                  </button>
+            <div className="k-scroll" ref={scrollRef}>
+              <div className="k-feed">
+                {history.length === 0 && isEmpty && (
+                  <div className="k-empty">
+                    <div className="k-empty-glyph">∑</div>
+                    <div style={{ color: "#5d6070" }}>Type an expression to get started</div>
+                    <div>
+                      {mode === "solve" ? "Enter an equation in x · fractions render naturally"
+                        : mode === "graph" ? "Enter f(x) · e.g. sin(x) or x²"
+                        : <>÷ fractions · ^ exponents · √ roots · <kbd>←</kbd><kbd>→</kbd> move</>}
+                    </div>
+                  </div>
                 )}
-                <span onClick={()=>copyResult(i, primary)} title="Tap to copy"
-                  style={{fontSize:h.type==="solve"?16:20,fontWeight:600,textAlign:"right",wordBreak:"break-all",cursor:"pointer",color:copiedIdx===i?"#34d399":h.type==="error"?"#ef4444":h.type==="solve"?"#60a5fa":h.type==="graph"?"#34d399":"#f472b6"}}>
-                  {copiedIdx===i ? "copied ✓" : primary}
-                </span>
+                {history.map((h, i) => (
+                  <HistoryEntry key={i} h={h}
+                    latest={i === lastIdx && isEmpty && justEvalRef.current}
+                    copied={copiedKey === i}
+                    onRecall={() => recall(h)}
+                    onCopy={(text) => copyText(i, text)}
+                    onToggleFraction={() => toggleDecimal(i)} />
+                ))}
+                <div className="k-current">
+                  <div className="k-editor" ref={editorRef} role="textbox" aria-label={isEmpty ? "Expression (empty)" : `Expression: ${toText(ast)}`}
+                    onPointerDown={onEditorPointerDown} onPointerMove={onEditorPointerMove}
+                    onPointerUp={onEditorPointerUp} onPointerCancel={onEditorPointerUp}>
+                    <MathView root={ast} cur={cur} blink={rev} placeholder={isEmpty ? placeholder : null} />
+                  </div>
+                  <div className={`k-preview${preview?.cls ? " " + preview.cls : ""}`}>{preview?.text ?? " "}</div>
+                </div>
               </div>
             </div>
-            );
-          })}
-        </div>
 
-        {/* Live Math Display */}
-        <div onClick={()=>{ onTapSeq(ast.id, ast.children.length); containerRef.current?.focus(); }}
-          style={{padding:"14px 16px",borderTop:"1px solid rgba(255,255,255,0.06)",minHeight:56,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,cursor:"text",overflowX:"auto",overflowY:"hidden",background:"rgba(255,255,255,0.012)"}}>
-          {isAstEmpty ? (
-            <div style={{display:"flex",alignItems:"center",gap:4}}>
-              <span style={{color:"#2a2a2a",fontSize:20,fontFamily:"'Space Grotesk',sans-serif"}}>{mode==="solve"?"x² − 4 = 0":(mode==="graph"||mode==="calculus")?"f(x)":"0"}</span>
-              <Cursor h={22} />
+            {suggestions.length > 0 && (
+              <div className="k-suggest" aria-label="Suggestions">
+                {suggestions.map((s) => (
+                  <button key={s.key} className={`k-chip${s.hot ? " hot" : ""}${s.info ? " info" : ""}`} onClick={s.run}>{s.label}</button>
+                ))}
+              </div>
+            )}
+
+            {mode === "calculus" && (
+              <div className="k-modebar">
+                <label htmlFor="ca-a">a</label>
+                <input id="ca-a" className="k-field" value={caA} onChange={(e) => setCaA(e.target.value)} inputMode="decimal" aria-label="lower bound / point a" />
+                <label htmlFor="ca-b">b</label>
+                <input id="ca-b" className="k-field" value={caB} onChange={(e) => setCaB(e.target.value)} inputMode="decimal" aria-label="upper bound b" />
+                <button className="k-btn" onClick={doDerivative} title="Derivative of f(x) at x=a">d/dx</button>
+                <button className="k-btn" onClick={() => calculate()} title="∫ from a to b" style={{ fontSize: 14 }}>∫</button>
+              </div>
+            )}
+            {mode === "graph" && (
+              <div className="k-modebar">
+                <button className="k-btn grow" onClick={() => { if (graphExprs.length) setShowGraph(true); }} disabled={!graphExprs.length}>View graph{graphExprs.length ? ` (${graphExprs.length})` : ""}</button>
+                <button className="k-btn ghost grow" onClick={() => setGraphExprs([])} disabled={!graphExprs.length}>Clear plots</button>
+              </div>
+            )}
+          </section>
+
+          {/* ── Keypad ── */}
+          <section className={`k-keypad${fnOpen ? " fn-open" : ""}`} aria-label="Keypad">
+            <div className="k-tools" onPointerDown={onToolsPointerDown} onPointerMove={onToolsPointerMove} onPointerUp={onToolsPointerUp} onPointerCancel={onToolsPointerUp}>
+              <button className="kk kk-tool kk-fntoggle" aria-expanded={fnOpen} title={fnOpen ? "Hide function keys" : "Show function keys"} onClick={tool(() => setFnOpen(!fnOpen))}>
+                ƒ<Icon name="up" size={14} />
+              </button>
+              <button className="kk kk-tool" title="Move left" onClick={tool(() => pressKey("◀"))}><Icon name="left" /></button>
+              <button className="kk kk-tool" title="Move right" onClick={tool(() => pressKey("▶"))}><Icon name="right" /></button>
+              <button className="kk kk-tool" title="Previous answer" onClick={tool(() => pressKey("ANS"))}>ANS</button>
+              <button className="kk kk-tool kk-ac" title="Clear" onClick={tool(() => pressKey("AC"))}>AC</button>
+              <button className="kk kk-tool" title="Delete" onClick={tool(() => pressKey("⌫"))}><Icon name="back" size={19} /></button>
             </div>
-          ) : (
-            <MathRender node={ast} fontSize={24} cursorSeqId={cursorSeqId} cursorPos={cursorPos} onTapSeq={onTapSeq} />
-          )}
-        </div>
 
-        {/* Suggestions */}
-        {suggestions.length>0&&<div style={{padding:"4px 12px",display:"flex",gap:6,overflowX:"auto",flexShrink:0,borderTop:"1px solid rgba(255,255,255,0.04)"}}>
-          {suggestions.map((s,i)=><button key={i} onClick={()=>{if(s.action==="eval")calculate();}} style={{padding:"5px 10px",borderRadius:8,fontSize:11,fontFamily:"'DM Mono',monospace",background:i===0?"rgba(244,114,182,0.12)":"rgba(255,255,255,0.04)",border:i===0?"1px solid rgba(244,114,182,0.2)":"1px solid rgba(255,255,255,0.06)",color:i===0?"#f472b6":"#888",cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>{s.label}</button>)}
-        </div>}
+            <div className="k-fnpanel" aria-hidden={!fnOpen}>
+              <div className="k-fnpanel-in">
+                {mode === "calc" && (
+                  <div className="k-vars">
+                    <button className={`kk kk-var kk-sto${storeArmed ? " armed" : ""}`} onClick={armStore} title="Store the current value into a variable" tabIndex={fnOpen ? 0 : -1}>{storeArmed ? "STO →" : "STO"}</button>
+                    {["A", "B", "C", "D", "M"].map((v) => (
+                      <button key={v} className={`kk kk-var${storeArmed ? " armed" : vars[v] !== undefined ? " set" : ""}`} onClick={() => onVar(v)} tabIndex={fnOpen ? 0 : -1}
+                        title={vars[v] !== undefined ? `${v} (stored — tap to use)` : `variable ${v}`}>{v}</button>
+                    ))}
+                  </div>
+                )}
+                <div className="k-grid">
+                  {fnRows.flat().map((k, i) => (
+                    <button key={k + i} className={keyClass(k)} onClick={() => onKeyBtn(k)} tabIndex={fnOpen ? 0 : -1}>{KEY_LABEL[k] ?? k}</button>
+                  ))}
+                </div>
+              </div>
+            </div>
 
-        {/* Action bar */}
-        <div style={{padding:"4px 12px",display:"flex",gap:6,flexShrink:0}}>
-          <button onClick={()=>pressKey("AC")} style={{flex:1,padding:"8px",borderRadius:8,fontSize:12,fontWeight:600,fontFamily:"'DM Mono',monospace",cursor:"pointer",background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.15)",color:"#ef4444"}}>AC</button>
-          <button onClick={()=>pressKey("⌫")} style={{flex:1,padding:"8px",borderRadius:8,fontSize:12,fontWeight:600,fontFamily:"'DM Mono',monospace",cursor:"pointer",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",color:"#888"}}>⌫</button>
-          <button onClick={()=>insertChar("ans")} style={{flex:1,padding:"8px",borderRadius:8,fontSize:12,fontWeight:600,fontFamily:"'DM Mono',monospace",cursor:"pointer",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",color:"#888"}}>ANS</button>
-          {mode==="graph"&&<button onClick={()=>{if(graphExprs.length)setShowGraph(true);}} style={{flex:1,padding:"8px",borderRadius:8,fontSize:12,fontWeight:600,fontFamily:"'DM Mono',monospace",cursor:"pointer",background:"rgba(52,211,153,0.1)",border:"1px solid rgba(52,211,153,0.15)",color:"#34d399"}}>VIEW</button>}
-          {mode==="graph"&&<button onClick={()=>setGraphExprs([])} style={{flex:1,padding:"8px",borderRadius:8,fontSize:12,fontWeight:600,fontFamily:"'DM Mono',monospace",cursor:"pointer",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",color:"#666"}}>CLR</button>}
-        </div>
-
-        {/* Variables (STO + recall A–M) */}
-        {mode==="calc" && (
-          <div style={{padding:"4px 12px",display:"flex",gap:5,flexShrink:0}}>
-            <button onClick={armStore} title="Store the current value into a variable"
-              style={{flex:"0 0 auto",padding:"6px 10px",borderRadius:8,fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace",cursor:"pointer",background:storeArmed?"rgba(96,165,250,0.25)":"rgba(255,255,255,0.04)",border:storeArmed?"1px solid #60a5fa":"1px solid rgba(255,255,255,0.08)",color:storeArmed?"#60a5fa":"#888"}}>{storeArmed?"STO →":"STO"}</button>
-            {["A","B","C","D","M"].map(v=>(
-              <button key={v} onClick={()=>onVar(v)} title={vars[v]!==undefined?`${v} (stored — tap to use)`:`variable ${v}`}
-                style={{flex:1,padding:"6px",borderRadius:8,fontSize:13,fontWeight:600,fontFamily:"'DM Mono',monospace",cursor:"pointer",background:storeArmed?"rgba(96,165,250,0.12)":vars[v]!==undefined?"rgba(96,165,250,0.07)":"rgba(255,255,255,0.04)",border:storeArmed?"1px solid rgba(96,165,250,0.3)":vars[v]!==undefined?"1px solid rgba(96,165,250,0.2)":"1px solid rgba(255,255,255,0.06)",color:(vars[v]!==undefined||storeArmed)?"#60a5fa":"#aaa"}}>{v}</button>
-            ))}
+            <div className="k-grid">
+              {baseRow.map((k, i) => k === "⇧"
+                ? <button key={k + i} className={`kk kk-shift${layer && fnOpen ? " on" : ""}`} onPointerDown={shiftDown} onPointerUp={shiftUp} onPointerLeave={shiftCancel} onContextMenu={(e) => e.preventDefault()}
+                    title={fnOpen ? "Switch function layer (hold: 3rd)" : "Show function keys"}>{fnOpen ? ["⇧", "2nd", "3rd"][layer] : "⇧"}</button>
+                : <button key={k + i} className={keyClass(k)} onClick={() => onKeyBtn(k)}>{KEY_LABEL[k] ?? k}</button>
+              )}
+            </div>
+            <div className="k-grid">
+              {numKeys.flat().map((k, i) => <button key={k + i} className={keyClass(k)} onClick={() => onKeyBtn(k)}>{KEY_LABEL[k] ?? k}</button>)}
+            </div>
+          </section>
+        </main>
+      ) : (
+        <main className="k-main">
+          <div className="k-toolpanel">
+            {mode === "base" ? <BasePanel /> : mode === "units" ? <UnitPanel /> : mode === "fx" ? <CurrencyPanel /> : null}
           </div>
-        )}
-
-        {/* Calculus controls: derivative point / integral bounds + actions */}
-        {mode==="calculus" && (
-          <div style={{padding:"4px 12px",display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
-            <span style={{fontSize:11,color:"#666",fontFamily:"'DM Mono',monospace"}}>a</span>
-            <input value={caA} onChange={e=>setCaA(e.target.value)} inputMode="decimal" aria-label="lower bound / point a"
-              style={{width:0,flex:1,minWidth:40,padding:"6px 8px",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(34,211,238,0.2)",borderRadius:8,color:"#fff",fontSize:13,fontFamily:"'DM Mono',monospace",outline:"none",boxSizing:"border-box"}}/>
-            <span style={{fontSize:11,color:"#666",fontFamily:"'DM Mono',monospace"}}>b</span>
-            <input value={caB} onChange={e=>setCaB(e.target.value)} inputMode="decimal" aria-label="upper bound b"
-              style={{width:0,flex:1,minWidth:40,padding:"6px 8px",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(34,211,238,0.2)",borderRadius:8,color:"#fff",fontSize:13,fontFamily:"'DM Mono',monospace",outline:"none",boxSizing:"border-box"}}/>
-            <button onClick={doDerivative} title="Derivative of f(x) at x=a" style={{padding:"6px 10px",borderRadius:8,fontSize:12,fontWeight:600,fontFamily:"'DM Mono',monospace",cursor:"pointer",background:"rgba(34,211,238,0.1)",border:"1px solid rgba(34,211,238,0.25)",color:"#22d3ee",whiteSpace:"nowrap"}}>d/dx</button>
-            <button onClick={()=>calculate()} title="∫ from a to b" style={{padding:"6px 12px",borderRadius:8,fontSize:14,fontWeight:600,fontFamily:"'DM Mono',monospace",cursor:"pointer",background:"rgba(34,211,238,0.18)",border:"1px solid rgba(34,211,238,0.35)",color:"#22d3ee",whiteSpace:"nowrap"}}>∫</button>
-          </div>
-        )}
-
-        {/* Sci keys */}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:5,padding:"4px 12px",flexShrink:0}}>
-          {mainKeys.flat().map((k,i)=> k==="⇧"
-            ? <button key={k+i} onPointerDown={shiftDown} onPointerUp={shiftUp} onPointerLeave={shiftCancel} onContextMenu={(e)=>e.preventDefault()} style={getKeyStyle(k)}>{["⇧","2nd","3rd"][layer]}</button>
-            : <button key={k+i} onClick={()=>handleBtnPress(k)} style={getKeyStyle(k)}>{KEY_LABEL[k]??k}</button>
-          )}
-        </div>
-        {/* Num keys */}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:5,padding:"4px 12px 16px",flexShrink:0}}>
-          {numKeys.flat().map((k,i)=><button key={k+i} onClick={()=>handleBtnPress(k)} style={getKeyStyle(k)}>{KEY_LABEL[k]??k}</button>)}
-        </div>
-      </>) : mode==="base" ? <BasePanel/> : mode==="units" ? <UnitPanel/> : mode==="fx" ? <CurrencyPanel/> : null}
-
-      <style>{`
-        .kalc-root{height:100vh;height:100dvh;}/* dvh avoids mobile keypad clipping; vh is the fallback */
-        @keyframes fadeIn{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:translateY(0);}}
-        @keyframes cursorBlink{0%,100%{opacity:1;}50%{opacity:0;}}
-        button:active{transform:scale(0.95)!important;opacity:0.8;}
-        ::-webkit-scrollbar{width:3px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px;}
-        *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-        select option{background:#1a1a2e;color:#ddd;}
-        input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0;}
-        input[type=number]{-moz-appearance:textfield;}
-        input::placeholder{color:#333;}
-      `}</style>
+        </main>
+      )}
     </div>
   );
 }
