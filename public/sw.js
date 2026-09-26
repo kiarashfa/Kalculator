@@ -3,9 +3,19 @@
 // first online visit, the app shell + hashed assets are cached, so it launches
 // and works fully offline. Cross-origin requests (e.g. Google Fonts) are not
 // cached; the webfonts are self-hosted, so they are cached with the app assets.
-const CACHE = "kalculator-v1";
+const CACHE = "kalculator-v2";
 
-self.addEventListener("install", () => self.skipWaiting());
+// UI icons are small self-hosted SVGs; precache them so panels opened for the
+// first time while offline (help, about, documents) still show their icons.
+// Keep in sync with public/icons/ui/.
+const ICONS = [
+  "backspace", "bulb", "check", "close", "code", "coffee", "copy", "cut", "dots", "duplicate", "edit", "eraser", "file", "file-plus", "folder", "github", "globe", "hand", "heart", "info", "keyboard", "left", "mail", "pages", "paste", "paypal", "plus", "redo", "right", "save", "sliders", "trash", "undo", "up"
+].map((n) => `icons/ui/${n}.svg`);
+
+self.addEventListener("install", (event) => {
+  self.skipWaiting();
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(ICONS)).catch(() => {}));
+});
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(

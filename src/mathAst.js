@@ -48,12 +48,27 @@ export function toExpr(n) {
   }
 }
 
+// Every function that becomes a structural func node — from the keypad or by
+// typing its name followed by "(". It is also the evaluator's allowlist (see
+// toMathjs), so a new function must be added here AND in mathInstance.js.
+export const FUNC_NAMES = [
+  "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", "tanh", "log", "ln", "log2", "abs", "exp", "cbrt",
+  "cot", "sec", "coth", "sech", "acot", "asec", "asinh", "acosh", "atanh", "acoth", "asech", // extended trig / hyperbolic
+  "gcd", "lcm", "min", "max", "nCr", "nPr", "mod", "logb",            // multi-arg (commas in the single arg seq)
+  "mean", "median", "std", "variance", "sum", "mode",                 // statistics (variadic; mode → array result)
+  "floor", "ceil", "round",                                           // rounding (typed by name)
+];
+
 // AST → human-readable linear text (chips, copy): 2/3 not ((2)/(3)), × − ÷ glyphs.
+// It is also the clipboard format: parseText (mathParse.js) reads it back into
+// the same structure, so copy → paste keeps fractions, powers and roots.
 const TEXT_GLYPH = { "*": "×", "-": "−", ans: "Ans" };
 export function toText(n) {
   if (!n) return "";
-  // parenthesize a slot unless it is a single node or a plain number (2.5)
-  const plain = (seq) => seq.children.length <= 1 || seq.children.every((c) => c.type === "char" && /^[0-9.]$/.test(c.value));
+  // parenthesize a slot unless it is a plain number (2.5) or one self-delimited
+  // node — a lone fraction still needs them: √(1/2), 2^(1/2), (1/2)/3
+  const plain = (seq) => seq.children.every((c) => c.type === "char" && /^[0-9.]$/.test(c.value))
+    || (seq.children.length === 1 && seq.children[0].type !== "frac");
   const group = (seq) => (plain(seq) ? toText(seq) : `(${toText(seq)})`);
   switch (n.type) {
     case "char": return TEXT_GLYPH[n.value] ?? n.value;
@@ -63,6 +78,35 @@ export function toText(n) {
     case "sqrt": return `√${group(n.rad)}`;
     case "func": return `${n.name}(${toText(n.arg)})`;
     case "paren": return `(${toText(n.inner)})`;
+    default: return "";
+  }
+}
+
+// AST → LaTeX (context menu "Copy as LaTeX").
+const LATEX_FN = new Set(["sin", "cos", "tan", "sinh", "cosh", "tanh", "cot", "sec", "coth", "ln", "log", "exp", "gcd", "min", "max", "arcsin", "arccos", "arctan"]);
+const LATEX_ARC = { asin: "arcsin", acos: "arccos", atan: "arctan" };
+const LATEX_CHAR = { "*": "\\times ", "/": "\\div ", "π": "\\pi ", ans: "\\mathrm{Ans}", "%": "\\%", E: "\\mathrm{E}" };
+export function toLatex(n) {
+  if (!n) return "";
+  const b = (seq) => "{" + toLatex(seq) + "}";
+  const fenced = (open, body, close) => "\\left" + open + body + "\\right" + close;
+  switch (n.type) {
+    case "char": return LATEX_CHAR[n.value] ?? n.value;
+    case "seq": return n.children.map(toLatex).join("").trim();
+    case "frac": return "\\frac" + b(n.num) + b(n.den);
+    case "sup": return "^" + b(n.exp);
+    case "sqrt": return "\\sqrt" + b(n.rad);
+    case "paren": return fenced("(", toLatex(n.inner), ")");
+    case "func": {
+      const arg = toLatex(n.arg);
+      if (n.name === "cbrt") return "\\sqrt[3]{" + arg + "}";
+      if (n.name === "abs") return fenced("|", arg, "|");
+      if (n.name === "exp") return "e^{" + arg + "}";
+      if (n.name === "log2") return "\\log_2" + fenced("(", arg, ")");
+      const name = LATEX_ARC[n.name] ?? n.name;
+      const head = LATEX_FN.has(name) ? "\\" + name : "\\operatorname{" + name + "}";
+      return head + fenced("(", arg, ")");
+    }
     default: return "";
   }
 }
@@ -87,13 +131,28 @@ const MATHJS_FN_MAP = {
 // (the `)` prevents digit-gluing): 50% → 0.5, 200+10% → 200.1, 100*5% → 5.
 // (True modulo is exposed separately as mod(a,b) — Phase 4.3.) Edge case: `%`
 // binds at multiply precedence, so `50%^2` ≠ `(50%)^2`; unusual, accepted.
+//
+// SECURITY: expressions can come from typing, pasting or an imported document
+// file, and math.js's parser can otherwise reach instance internals —
+// config({number:"BigNumber"}) silently reconfigures every later result;
+// evaluate/parse/compile are reachable too. So every identifier must be on an
+// allowlist (the app's functions + constants/variables); anything else becomes
+// a syntax error. The exponent of a number literal (1E3, 2e5) is not a name.
+const ALLOWED_NAMES = new Set([
+  ...FUNC_NAMES.map((f) => MATHJS_FN_MAP[f] ?? f),
+  "sqrt", "pi", "e", "i", "x", "ans", "A", "B", "C", "D", "M",
+]);
 export function toMathjs(expr) {
   if (!expr) return "";
   return expr
     .replace(/×/g, "*").replace(/÷/g, "/").replace(/−/g, "-") // normalize pretty glyphs (defense-in-depth)
     .replace(/%/g, "*(1/100)")
     .replace(/π/g, "pi")
-    .replace(/[A-Za-z][A-Za-z0-9]*/g, (w) => MATHJS_FN_MAP[w] ?? w);
+    .replace(/[A-Za-z][A-Za-z0-9]*/g, (w, at, src) => {
+      if (/^[eE]\d+$/.test(w) && /[0-9.]/.test(src[at - 1] ?? "")) return w; // 1E3 / 2e5
+      const name = MATHJS_FN_MAP[w] ?? w;
+      return ALLOWED_NAMES.has(name) ? name : "@"; // "@" → math.js syntax error
+    });
 }
 
 // Find seq by id

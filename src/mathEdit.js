@@ -11,6 +11,7 @@ import {
   mkSeq, mkChar, mkFrac, mkSup, mkSqrt, mkFunc, mkParen,
   findSeq, findParentOf, extractPrecedingOperand, slotsOf, isOperatorChar,
 } from "./mathAst.js";
+import { parseText } from "./mathParse.js";
 
 const at = (seq, pos) => ({ seqId: seq.id, pos });
 const isEmptyNode = (n) => slotsOf(n).every((s) => s.children.length === 0);
@@ -105,7 +106,7 @@ export function moveEnd(root, cur) {
   return pos < seq.children.length ? at(seq, seq.children.length) : endOf(root);
 }
 
-// Leave the innermost structure to the right (HandyCalc's "→|"). No-op at top level.
+// Leave the innermost structure to the right (the "→|" key). No-op at top level.
 export function exitRight(root, cur) {
   const { seq, pos } = locate(root, cur);
   const up = findParentOf(root, seq.id);
@@ -152,15 +153,17 @@ export function typeChar(root, cur, ch) {
   return next;
 }
 
-// Paste: plain text inserted literally (math.js reads 2/3+1 correctly as text,
-// which a structural re-typing of "/" would not).
+// Insert ready-made nodes at the caret (paste); the caret lands after them.
+export function insertNodes(root, cur, nodes) {
+  const { seq, pos } = locate(root, cur);
+  seq.children.splice(pos, 0, ...nodes);
+  return at(seq, pos + nodes.length);
+}
+
+// Paste: text is parsed back into structure (2^3 → 2³, (1+2)/3 → a fraction),
+// so copying from the app and pasting keeps the formatting.
 export function insertText(root, cur, text) {
-  const norm = String(text).replace(/×/g, "*").replace(/÷/g, "/").replace(/[−–]/g, "-").replace(/\s+/g, "");
-  let c = cur;
-  for (const ch of norm) {
-    if (/^[0-9A-Za-z.+\-*/^%!=,()π]$/.test(ch)) c = insertChar(root, c, ch);
-  }
-  return c;
+  return insertNodes(root, cur, parseText(text));
 }
 
 // The operand before the caret, for a fraction slot: a lone ( ) group is
@@ -299,7 +302,7 @@ export function deleteForward(root, cur) {
 
 // ─── Queries ────────────────────────────────────────────────────────────────
 // The innermost function / root / ( ) / fraction around the caret — the
-// sub-expression HandyCalc evaluates for you ("ln(5) = 1.609438").
+// sub-expression whose value the suggestion strip shows ("ln(5) = 1.609438").
 const SUBEXPR = new Set(["func", "sqrt", "paren", "frac"]);
 export function enclosingNode(root, cur) {
   const { seq } = locate(root, cur);

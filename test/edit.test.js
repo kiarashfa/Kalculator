@@ -161,10 +161,10 @@ test("1/x takes a whole power as the denominator: 2³ → 1/2³", () => {
   assert.equal(run(["2", "^", "3", "→", "1/x"]).expr, "((1)/(2^(3)))");
 });
 
-test("paste inserts literally (2/3+1 stays linear, glyphs normalised)", () => {
+test("paste parses text back into structure (glyphs normalised)", () => {
   const root = mkSeq();
   insertText(root, { seqId: root.id, pos: 0 }, "2 ÷ 3 + 1 × 4 − 1");
-  assert.equal(toExpr(root), "2/3+1*4-1");
+  assert.equal(toExpr(root), "((2)/(3))+1*4-1");
 });
 
 test("wrapAll wraps the whole expression in a function", () => {

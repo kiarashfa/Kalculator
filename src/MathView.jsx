@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// MathView — renders the structural tree as 2D math, HandyCalc-style.
+// MathView — renders the structural tree as natural 2D math.
 // Pure presentation: styling lives in styles/app.css (.m-*). Layout notes:
 //  · Every glyph uses one font at one size (digits, function names, operators).
 //  · Fractions are `inline-grid` with rows `1fr auto 1fr`: numerator and
