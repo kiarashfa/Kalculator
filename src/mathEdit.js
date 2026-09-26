@@ -309,3 +309,74 @@ export function enclosingNode(root, cur) {
   for (const up of ancestors(root, seq)) if (SUBEXPR.has(up.structNode.type)) return up.structNode;
   return null;
 }
+
+// ─── Selection ──────────────────────────────────────────────────────────────
+// A selection is a run of siblings in one seq: { seqId, start, end }. It comes
+// from an anchor and a focus caret that may sit at different depths: the run
+// is taken in their deepest common seq and widened to whole structures, so a
+// selection never cuts a fraction (or a root, a power…) in half.
+function pathOf(root, cur) {
+  const { seq, pos } = locate(root, cur);
+  const path = [{ seq, lo: pos, hi: pos }];
+  for (const up of ancestors(root, seq)) path.push({ seq: up.parentSeq, lo: up.structIdx, hi: up.structIdx + 1 });
+  return path;
+}
+export function selectionRange(root, anchor, focus) {
+  if (!anchor || !focus) return null;
+  const pa = pathOf(root, anchor), pf = pathOf(root, focus);
+  for (const a of pa) {
+    const f = pf.find((x) => x.seq === a.seq);
+    if (!f) continue;
+    const start = Math.min(a.lo, f.lo), end = Math.max(a.hi, f.hi);
+    return end > start ? { seqId: a.seq.id, start, end } : null;
+  }
+  return null;
+}
+
+// Shift+← / → moves the focus by whole siblings; at the edge of a slot it
+// steps out, which widens the selection to the entire structure.
+export function selStep(root, focus, dir) {
+  const { seq, pos } = locate(root, focus);
+  if (pos + dir >= 0 && pos + dir <= seq.children.length) return at(seq, pos + dir);
+  const up = findParentOf(root, seq.id);
+  if (!up) return at(seq, pos);
+  return at(up.parentSeq, dir < 0 ? up.structIdx : up.structIdx + 1);
+}
+
+export function rangeNodes(root, r) {
+  const seq = r && findSeq(root, r.seqId);
+  return seq ? seq.children.slice(r.start, r.end) : [];
+}
+export function deleteRange(root, r) {
+  const seq = findSeq(root, r.seqId);
+  if (!seq) return endOf(root);
+  seq.children.splice(r.start, r.end - r.start);
+  return at(seq, r.start);
+}
+
+// Keys pressed on a selection act on it as a whole:
+//   paren → (sel) · frac → sel over ▢ · recip → 1 over sel · sqrt / func → f(sel)
+//   pow → (sel)^▢, or (sel)² / (sel)³ with a preset exponent
+export function wrapRange(root, r, kind, arg) {
+  const seq = findSeq(root, r.seqId);
+  if (!seq) return endOf(root);
+  const nodes = seq.children.splice(r.start, r.end - r.start);
+  const bare = nodes.length === 1 && nodes[0].type === "paren" ? nodes[0].inner.children : nodes;
+  const put = (...n) => { seq.children.splice(r.start, 0, ...n); return r.start + n.length; };
+  switch (kind) {
+    case "paren": return at(seq, put(mkParen(mkSeq(nodes))));
+    case "sqrt": return at(seq, put(mkSqrt(mkSeq(bare))));
+    case "func": return at(seq, put(mkFunc(arg, mkSeq(bare))));
+    case "recip": return at(seq, put(mkFrac(mkSeq([mkChar("1")]), mkSeq(bare))));
+    case "frac": { const f = mkFrac(mkSeq(bare), mkSeq()); put(f); return at(f.den, 0); }
+    case "pow": {
+      const single = nodes.length === 1 && !isOperatorChar(nodes[0]) && nodes[0].type !== "sup";
+      const number = nodes.every((n) => n.type === "char" && /^[0-9.]$/.test(n.value));
+      const base = single || number ? nodes : [mkParen(mkSeq(nodes))];
+      const exp = mkSeq(arg ? [...arg].map(mkChar) : []);
+      const end = put(...base, mkSup(exp));
+      return arg ? at(seq, end) : at(exp, 0);
+    }
+    default: return at(seq, put(...nodes));
+  }
+}

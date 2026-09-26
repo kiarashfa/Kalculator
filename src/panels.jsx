@@ -5,6 +5,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { parseInBase, formatBases } from "./baseConvert.js";
 import { MathEngine } from "./compute.js";
+import MathView from "./MathView.jsx";
 
 // ─── Unit & Currency Data (compact) ─────────────────────────────────────────
 const UNIT_DATA = {
@@ -15,12 +16,12 @@ const UNIT_DATA = {
   "Temperature":{"Celsius (°C)":"C","Fahrenheit (°F)":"F","Kelvin (K)":"K","Rankine (°R)":"R"},
   "Speed":{"m/s":1,"km/h":0.2778,"mph":0.4470,"Knot":0.5144,"ft/s":0.3048,"Mach":343,"Speed of Light":299792458},
   "Time":{"Second":1,"Millisecond":0.001,"Minute":60,"Hour":3600,"Day":86400,"Week":604800,"Month (avg)":2629746,"Year":31556952},
-  "Energy":{"Joule (J)":1,"Kilojoule (kJ)":1000,"Calorie":4.184,"Kilocalorie":4184,"Watt-hour":3600,"kWh":3.6e6,"BTU":1055,"eV":1.602e-19},
+  "Energy":{"Joule (J)":1,"Kilojoule (kJ)":1000,"Calorie":4.184,"Kilocalorie":4184,"Watt hour":3600,"kWh":3.6e6,"BTU":1055,"eV":1.602e-19},
   "Power":{"Watt (W)":1,"Kilowatt (kW)":1000,"Megawatt (MW)":1e6,"Horsepower (hp)":745.7,"BTU/h":0.293},
   "Pressure":{"Pascal (Pa)":1,"Kilopascal (kPa)":1000,"Bar":1e5,"PSI":6895,"Atmosphere":101325,"Torr":133.3},
   "Data":{"Bit":1,"Byte":8,"Kilobyte (KB)":8000,"Megabyte (MB)":8e6,"Gigabyte (GB)":8e9,"Terabyte (TB)":8e12},
   "Frequency":{"Hertz (Hz)":1,"kHz":1000,"MHz":1e6,"GHz":1e9,"RPM":1/60},
-  "Force":{"Newton (N)":1,"kN":1000,"Dyne":1e-5,"Pound-force":4.448,"kgf":9.807},
+  "Force":{"Newton (N)":1,"kN":1000,"Dyne":1e-5,"Pound force":4.448,"kgf":9.807},
   "Angle":{"Degree (°)":1,"Radian":57.296,"Gradian":0.9,"Revolution":360},
 };
 function convertTemperature(v,from,to){let c;if(from==="C")c=v;else if(from==="F")c=(v-32)*5/9;else if(from==="K")c=v-273.15;else c=(v-491.67)*5/9;if(to==="C")return c;if(to==="F")return c*9/5+32;if(to==="K")return c+273.15;return(c+273.15)*9/5;}
@@ -42,12 +43,138 @@ const CURRENCY_RATES_DATE = "September 2026";
 
 
 // ─── Graph ──────────────────────────────────────────────────────────────────
-export function GraphView({ expressions, onClose }) {
-  const canvasRef=useRef(null);const[vp,setVp]=useState({xMin:-10,xMax:10,yMin:-7,yMax:7});const dragRef=useRef(null);
-  const colors=["#f472b6","#60a5fa","#34d399","#fbbf24","#a78bfa","#fb923c"];
-  const draw=useCallback(()=>{const cv=canvasRef.current;if(!cv)return;const ctx=cv.getContext("2d");const W=cv.width=cv.offsetWidth*2,H=cv.height=cv.offsetHeight*2;ctx.scale(2,2);const w=W/2,h=H/2;const{xMin,xMax,yMin,yMax}=vp;const sx=x=>((x-xMin)/(xMax-xMin))*w,sy=y=>h-((y-yMin)/(yMax-yMin))*h;ctx.fillStyle="#0a0a0f";ctx.fillRect(0,0,w,h);const gs=v=>{const r=v/8,m=Math.pow(10,Math.floor(Math.log10(r))),n=r/m;return n<1.5?m:n<3.5?2*m:n<7.5?5*m:10*m;};const xs=gs(xMax-xMin),ys=gs(yMax-yMin);ctx.strokeStyle="rgba(255,255,255,0.06)";ctx.lineWidth=0.5;for(let x=Math.ceil(xMin/xs)*xs;x<=xMax;x+=xs){const px=sx(x);ctx.beginPath();ctx.moveTo(px,0);ctx.lineTo(px,h);ctx.stroke();ctx.fillStyle="rgba(255,255,255,0.3)";ctx.font="10px monospace";ctx.textAlign="center";if(Math.abs(x)>xs*0.01)ctx.fillText(parseFloat(x.toPrecision(4)),px,sy(0)+14);}for(let y=Math.ceil(yMin/ys)*ys;y<=yMax;y+=ys){const py=sy(y);ctx.beginPath();ctx.moveTo(0,py);ctx.lineTo(w,py);ctx.stroke();ctx.fillStyle="rgba(255,255,255,0.3)";ctx.font="10px monospace";ctx.textAlign="right";if(Math.abs(y)>ys*0.01)ctx.fillText(parseFloat(y.toPrecision(4)),sx(0)-6,py+3);}ctx.strokeStyle="rgba(255,255,255,0.25)";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(sx(0),0);ctx.lineTo(sx(0),h);ctx.stroke();ctx.beginPath();ctx.moveTo(0,sy(0));ctx.lineTo(w,sy(0));ctx.stroke();expressions.forEach((expr,idx)=>{const pts=MathEngine.graphPts(expr,xMin,xMax,Math.min(800,w));ctx.strokeStyle=colors[idx%colors.length];ctx.lineWidth=2;ctx.lineJoin="round";ctx.beginPath();let d=false,prevY=null;for(const p of pts){if(p.y===null||Math.abs(p.y)>(yMax-yMin)*50){d=false;prevY=null;continue;}if(prevY!==null&&Math.abs(p.y-prevY)>(yMax-yMin)){d=false;}/* asymptote jump → pen up */const px=sx(p.x),py=sy(p.y);if(!d){ctx.moveTo(px,py);d=true;}else ctx.lineTo(px,py);prevY=p.y;}ctx.stroke();});expressions.forEach((e,i)=>{ctx.fillStyle=colors[i%colors.length];ctx.font="bold 12px monospace";ctx.textAlign="left";ctx.fillText(`f(x) = ${e}`,12,20+i*20);});},[vp,expressions]);
-  useEffect(()=>{draw();},[draw]);
-  return(<div style={{position:"fixed",inset:0,zIndex:100,background:"#0a0a0f",display:"flex",flexDirection:"column"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}><span style={{color:"#f472b6",fontWeight:700,fontSize:14}}>GRAPH</span><div style={{display:"flex",gap:8}}><button onClick={()=>setVp({xMin:-10,xMax:10,yMin:-7,yMax:7})} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",color:"#ccc",borderRadius:6,padding:"6px 14px",cursor:"pointer",fontSize:11}}>Reset</button><button onClick={onClose} style={{background:"rgba(244,114,182,0.15)",border:"1px solid rgba(244,114,182,0.3)",color:"#f472b6",borderRadius:6,padding:"6px 14px",cursor:"pointer",fontSize:11,fontWeight:600}}>Close</button></div></div><canvas ref={canvasRef} style={{flex:1,cursor:"grab",touchAction:"none"}} onWheel={e=>{e.preventDefault();const f=e.deltaY>0?1.15:0.87;setVp(v=>{const cx=(v.xMin+v.xMax)/2,cy=(v.yMin+v.yMax)/2,hw=((v.xMax-v.xMin)/2)*f,hh=((v.yMax-v.yMin)/2)*f;return{xMin:cx-hw,xMax:cx+hw,yMin:cy-hh,yMax:cy+hh};});}} onPointerDown={e=>{const r=canvasRef.current.getBoundingClientRect();dragRef.current={x:e.clientX,y:e.clientY,v:{...vp},r};canvasRef.current.setPointerCapture(e.pointerId);}} onPointerMove={e=>{if(!dragRef.current)return;const{x,y,v,r}=dragRef.current;const dx=(e.clientX-x)/r.width*(v.xMax-v.xMin),dy=(e.clientY-y)/r.height*(v.yMax-v.yMin);setVp({xMin:v.xMin-dx,xMax:v.xMax-dx,yMin:v.yMin+dy,yMax:v.yMax+dy});}} onPointerUp={()=>{dragRef.current=null;}}/></div>);
+// The document's plotted pages: plots = [{ id, tree, expr, color, hidden }].
+// The legend shows each function as real math; tapping one hides/shows it.
+export const PLOT_COLORS = ["#f472b6", "#60a5fa", "#34d399", "#fbbf24", "#a78bfa", "#fb923c"];
+const HOME_VIEW = { xMin: -10, xMax: 10, yMin: -7, yMax: 7 };
+// negative numbers (and exponents) shown with a true minus sign
+const minus = (s) => String(s).replace(/(^|e)-/g, "$1−");
+
+export function GraphView({ plots, angle, onToggle, onClose }) {
+  const canvasRef = useRef(null);
+  const dragRef = useRef(null);
+  const [vp, setVp] = useState(HOME_VIEW);
+  const visible = plots.filter((p) => !p.hidden);
+  const plotKey = visible.map((p) => p.id + p.expr).join("|");
+
+  const draw = useCallback(() => {
+    const cv = canvasRef.current;
+    if (!cv) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    const w = cv.offsetWidth, h = cv.offsetHeight;
+    cv.width = w * dpr;
+    cv.height = h * dpr;
+    const ctx = cv.getContext("2d");
+    ctx.scale(dpr, dpr);
+    const { xMin, xMax, yMin, yMax } = vp;
+    const sx = (x) => ((x - xMin) / (xMax - xMin)) * w;
+    const sy = (y) => h - ((y - yMin) / (yMax - yMin)) * h;
+    ctx.fillStyle = "#0a0a0f";
+    ctx.fillRect(0, 0, w, h);
+
+    // grid every 1/2/5 × 10^n, labels kept on screen when an axis is off it
+    const step = (span) => { const r = span / 8, m = 10 ** Math.floor(Math.log10(r)), n = r / m; return n < 1.5 ? m : n < 3.5 ? 2 * m : n < 7.5 ? 5 * m : 10 * m; };
+    const label = (v) => minus(parseFloat(v.toPrecision(4)));
+    const xs = step(xMax - xMin), ys = step(yMax - yMin);
+    const labelY = Math.min(h - 6, Math.max(14, sy(0) + 14));
+    const labelX = Math.min(w - 4, Math.max(30, sx(0) - 6));
+    ctx.font = "10px 'DM Mono', monospace";
+    ctx.lineWidth = 0.5;
+    for (let x = Math.ceil(xMin / xs) * xs; x <= xMax; x += xs) {
+      ctx.strokeStyle = "rgba(255,255,255,0.06)";
+      ctx.beginPath(); ctx.moveTo(sx(x), 0); ctx.lineTo(sx(x), h); ctx.stroke();
+      if (Math.abs(x) > xs * 0.01) { ctx.fillStyle = "rgba(255,255,255,0.32)"; ctx.textAlign = "center"; ctx.fillText(label(x), sx(x), labelY); }
+    }
+    for (let y = Math.ceil(yMin / ys) * ys; y <= yMax; y += ys) {
+      ctx.strokeStyle = "rgba(255,255,255,0.06)";
+      ctx.beginPath(); ctx.moveTo(0, sy(y)); ctx.lineTo(w, sy(y)); ctx.stroke();
+      if (Math.abs(y) > ys * 0.01) { ctx.fillStyle = "rgba(255,255,255,0.32)"; ctx.textAlign = "right"; ctx.fillText(label(y), labelX, sy(y) + 3); }
+    }
+    ctx.strokeStyle = "rgba(255,255,255,0.25)";
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(sx(0), 0); ctx.lineTo(sx(0), h); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, sy(0)); ctx.lineTo(w, sy(0)); ctx.stroke();
+
+    for (const p of visible) {
+      const pts = MathEngine.graphPts(p.expr, xMin, xMax, Math.min(800, w));
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = 2;
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      let down = false, prevY = null;
+      for (const pt of pts) {
+        if (pt.y === null || Math.abs(pt.y) > (yMax - yMin) * 50) { down = false; prevY = null; continue; }
+        if (prevY !== null && Math.abs(pt.y - prevY) > yMax - yMin) down = false; // asymptote jump → pen up
+        if (!down) { ctx.moveTo(sx(pt.x), sy(pt.y)); down = true; } else ctx.lineTo(sx(pt.x), sy(pt.y));
+        prevY = pt.y;
+      }
+      ctx.stroke();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vp, plotKey, angle]);
+
+  useEffect(() => { draw(); }, [draw]);
+  useEffect(() => {
+    const cv = canvasRef.current;
+    const onResize = () => draw();
+    // wheel zoom needs a non-passive listener to stop the page from scrolling
+    const onWheel = (e) => { e.preventDefault(); zoom(e.deltaY > 0 ? 1.15 : 0.87); };
+    window.addEventListener("resize", onResize);
+    cv?.addEventListener("wheel", onWheel, { passive: false });
+    return () => { window.removeEventListener("resize", onResize); cv?.removeEventListener("wheel", onWheel); };
+  }, [draw]);
+
+  function zoom(f) {
+    setVp((v) => {
+      const cx = (v.xMin + v.xMax) / 2, cy = (v.yMin + v.yMax) / 2;
+      const hw = ((v.xMax - v.xMin) / 2) * f, hh = ((v.yMax - v.yMin) / 2) * f;
+      return { xMin: cx - hw, xMax: cx + hw, yMin: cy - hh, yMax: cy + hh };
+    });
+  }
+  const onPointerDown = (e) => {
+    dragRef.current = { x: e.clientX, y: e.clientY, v: { ...vp }, r: canvasRef.current.getBoundingClientRect() };
+    canvasRef.current.setPointerCapture(e.pointerId);
+  };
+  const onPointerMove = (e) => {
+    if (!dragRef.current) return;
+    const { x, y, v, r } = dragRef.current;
+    const dx = ((e.clientX - x) / r.width) * (v.xMax - v.xMin), dy = ((e.clientY - y) / r.height) * (v.yMax - v.yMin);
+    setVp({ xMin: v.xMin - dx, xMax: v.xMax - dx, yMin: v.yMin + dy, yMax: v.yMax + dy });
+  };
+
+  return (
+    <div className="k-graph" role="dialog" aria-label="Graph">
+      <div className="k-graph-bar">
+        <span className="k-graph-title">Graph <em>{angle === "deg" ? "DEG" : "RAD"}</em></span>
+        <div className="k-graph-actions">
+          <button className="k-btn ghost k-zoom" onClick={() => zoom(1 / 1.4)} title="Zoom in">+</button>
+          <button className="k-btn ghost k-zoom" onClick={() => zoom(1.4)} title="Zoom out">{"−"}</button>
+          <button className="k-btn ghost" onClick={() => setVp(HOME_VIEW)}>Reset</button>
+          <button className="k-btn" onClick={onClose}>Close</button>
+        </div>
+      </div>
+      <div className="k-graph-body">
+        <canvas ref={canvasRef} onPointerDown={onPointerDown} onPointerMove={onPointerMove}
+          onPointerUp={() => { dragRef.current = null; }} onPointerCancel={() => { dragRef.current = null; }} />
+        {plots.length > 0 && (
+          <ul className="k-graph-legend">
+            {plots.map((p) => (
+              <li key={p.id}>
+                <button className={p.hidden ? "off" : ""} onClick={() => onToggle(p.id)} title={p.hidden ? "Show this plot" : "Hide this plot"}>
+                  <span className="k-swatch" style={{ background: p.color }} />
+                  <span className="k-legend-y">y =</span>
+                  <MathView root={p.tree} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {!visible.length && (
+          <p className="k-graph-empty">{plots.length ? "All plots are hidden. Tap one to show it." : "Nothing plotted yet. Type f(x) in Graph mode and press =."}</p>
+        )}
+      </div>
+    </div>
+  );
 }
 
 
@@ -56,10 +183,10 @@ export function UnitPanel() {
   const cats=Object.keys(UNIT_DATA);const[cat,setCat]=useState("Length");const[fu,setFu]=useState("");const[tu,setTu]=useState("");const[fv,setFv]=useState("1");const[search,setSearch]=useState("");const[showCat,setShowCat]=useState(false);
   const units=useMemo(()=>Object.keys(UNIT_DATA[cat]||{}),[cat]);
   useEffect(()=>{setFu(units[0]||"");setTu(units[1]||"");},[cat,units]);
-  const result=useMemo(()=>{const v=parseFloat(fv);if(isNaN(v))return"";const r=convertUnit(v,cat,fu,tu);if(r===null)return"—";if(Math.abs(r)<1e-4||Math.abs(r)>1e12)return r.toExponential(6);return parseFloat(r.toPrecision(10)).toLocaleString("en-US",{maximumFractionDigits:10});},[fv,cat,fu,tu]);
+  const result=useMemo(()=>{const v=parseFloat(fv);if(isNaN(v))return"";const r=convertUnit(v,cat,fu,tu);if(r===null)return"–";if(Math.abs(r)<1e-4||Math.abs(r)>1e12)return r.toExponential(6);return parseFloat(r.toPrecision(10)).toLocaleString("en-US",{maximumFractionDigits:10});},[fv,cat,fu,tu]);
   const ss={width:"100%",padding:"10px 12px",borderRadius:8,fontSize:13,fontFamily:"'DM Mono',monospace",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",color:"#ddd",appearance:"none",outline:"none"};
   const fc=cats.filter(c=>c.toLowerCase().includes(search.toLowerCase()));
-  return(<div style={{padding:16,display:"flex",flexDirection:"column",gap:12,flex:1,overflowY:"auto"}}><button onClick={()=>setShowCat(!showCat)} style={{padding:"10px 14px",borderRadius:10,fontSize:13,fontWeight:600,fontFamily:"'DM Mono',monospace",cursor:"pointer",textAlign:"left",background:"rgba(251,191,36,0.08)",border:"1px solid rgba(251,191,36,0.15)",color:"#fbbf24",display:"flex",justifyContent:"space-between",alignItems:"center"}}><span>{cat}</span><span style={{fontSize:10,opacity:0.6}}>{showCat?"▲":"▼"}</span></button>{showCat&&<div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,maxHeight:240,overflowY:"auto",padding:4}}><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search..." style={{width:"100%",padding:"8px",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:6,color:"#ccc",fontSize:12,fontFamily:"'DM Mono',monospace",outline:"none",marginBottom:4,boxSizing:"border-box"}}/>{fc.map(c=><button key={c} onClick={()=>{setCat(c);setShowCat(false);setSearch("");}} style={{display:"block",width:"100%",textAlign:"left",padding:"8px 10px",background:c===cat?"rgba(251,191,36,0.1)":"transparent",border:"none",color:c===cat?"#fbbf24":"#999",fontSize:12,fontFamily:"'DM Mono',monospace",cursor:"pointer",borderRadius:6}}>{c}</button>)}</div>}<div style={{background:"rgba(255,255,255,0.02)",borderRadius:12,padding:14,border:"1px solid rgba(255,255,255,0.05)"}}><div style={{fontSize:10,color:"#666",marginBottom:8,textTransform:"uppercase",letterSpacing:1}}>From</div><input value={fv} onChange={e=>setFv(e.target.value)} type="number" inputMode="decimal" style={{width:"100%",padding:"10px 0",background:"transparent",border:"none",outline:"none",color:"#fff",fontSize:28,fontFamily:"'DM Mono',monospace",fontWeight:600,boxSizing:"border-box"}}/><select value={fu} onChange={e=>setFu(e.target.value)} style={ss}>{units.map(u=><option key={u} value={u}>{u}</option>)}</select></div><div style={{display:"flex",justifyContent:"center"}}><button onClick={()=>{setFu(tu);setTu(fu);}} style={{width:40,height:40,borderRadius:"50%",background:"rgba(251,191,36,0.1)",border:"1px solid rgba(251,191,36,0.2)",color:"#fbbf24",cursor:"pointer",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center"}}>⇅</button></div><div style={{background:"rgba(255,255,255,0.02)",borderRadius:12,padding:14,border:"1px solid rgba(255,255,255,0.05)"}}><div style={{fontSize:10,color:"#666",marginBottom:8,textTransform:"uppercase",letterSpacing:1}}>To</div><div style={{fontSize:28,fontWeight:600,color:"#fbbf24",fontFamily:"'DM Mono',monospace",padding:"10px 0",minHeight:50,wordBreak:"break-all"}}>{result||"—"}</div><select value={tu} onChange={e=>setTu(e.target.value)} style={ss}>{units.map(u=><option key={u} value={u}>{u}</option>)}</select></div></div>);
+  return(<div style={{padding:16,display:"flex",flexDirection:"column",gap:12,flex:1,overflowY:"auto"}}><button onClick={()=>setShowCat(!showCat)} style={{padding:"10px 14px",borderRadius:10,fontSize:13,fontWeight:600,fontFamily:"'DM Mono',monospace",cursor:"pointer",textAlign:"left",background:"rgba(251,191,36,0.08)",border:"1px solid rgba(251,191,36,0.15)",color:"#fbbf24",display:"flex",justifyContent:"space-between",alignItems:"center"}}><span>{cat}</span><span style={{fontSize:10,opacity:0.6}}>{showCat?"▲":"▼"}</span></button>{showCat&&<div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,maxHeight:240,overflowY:"auto",padding:4}}><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search..." style={{width:"100%",padding:"8px",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:6,color:"#ccc",fontSize:12,fontFamily:"'DM Mono',monospace",outline:"none",marginBottom:4,boxSizing:"border-box"}}/>{fc.map(c=><button key={c} onClick={()=>{setCat(c);setShowCat(false);setSearch("");}} style={{display:"block",width:"100%",textAlign:"left",padding:"8px 10px",background:c===cat?"rgba(251,191,36,0.1)":"transparent",border:"none",color:c===cat?"#fbbf24":"#999",fontSize:12,fontFamily:"'DM Mono',monospace",cursor:"pointer",borderRadius:6}}>{c}</button>)}</div>}<div style={{background:"rgba(255,255,255,0.02)",borderRadius:12,padding:14,border:"1px solid rgba(255,255,255,0.05)"}}><div style={{fontSize:10,color:"#666",marginBottom:8,textTransform:"uppercase",letterSpacing:1}}>From</div><input value={fv} onChange={e=>setFv(e.target.value)} type="number" inputMode="decimal" style={{width:"100%",padding:"10px 0",background:"transparent",border:"none",outline:"none",color:"#fff",fontSize:28,fontFamily:"'DM Mono',monospace",fontWeight:600,boxSizing:"border-box"}}/><select value={fu} onChange={e=>setFu(e.target.value)} style={ss}>{units.map(u=><option key={u} value={u}>{u}</option>)}</select></div><div style={{display:"flex",justifyContent:"center"}}><button onClick={()=>{setFu(tu);setTu(fu);}} style={{width:40,height:40,borderRadius:"50%",background:"rgba(251,191,36,0.1)",border:"1px solid rgba(251,191,36,0.2)",color:"#fbbf24",cursor:"pointer",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center"}}>⇅</button></div><div style={{background:"rgba(255,255,255,0.02)",borderRadius:12,padding:14,border:"1px solid rgba(255,255,255,0.05)"}}><div style={{fontSize:10,color:"#666",marginBottom:8,textTransform:"uppercase",letterSpacing:1}}>To</div><div style={{fontSize:28,fontWeight:600,color:"#fbbf24",fontFamily:"'DM Mono',monospace",padding:"10px 0",minHeight:50,wordBreak:"break-all"}}>{minus(result)||"–"}</div><select value={tu} onChange={e=>setTu(e.target.value)} style={ss}>{units.map(u=><option key={u} value={u}>{u}</option>)}</select></div></div>);
 }
 
 
@@ -71,7 +198,7 @@ export function CurrencyPanel() {
   const filtered=codes.filter(c=>{const s=search.toLowerCase();return c.toLowerCase().includes(s)||CURRENCY_DATA[c].name.toLowerCase().includes(s);});
   const CB=({code,onClick})=><button onClick={onClick} style={{width:"100%",padding:"10px 12px",borderRadius:8,textAlign:"left",display:"flex",alignItems:"center",gap:10,cursor:"pointer",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",color:"#ddd",fontFamily:"'DM Mono',monospace",fontSize:13}}><span style={{fontSize:20}}>{CURRENCY_DATA[code].flag}</span><div><div style={{fontWeight:600}}>{code}</div><div style={{fontSize:10,color:"#666"}}>{CURRENCY_DATA[code].name}</div></div><span style={{marginLeft:"auto",fontSize:10,color:"#555"}}>▼</span></button>;
   if(pick)return(<div style={{padding:16,display:"flex",flexDirection:"column",gap:8,flex:1,overflowY:"auto"}}><div style={{display:"flex",gap:8,alignItems:"center"}}><button onClick={()=>{setPick(null);setSearch("");}} style={{background:"none",border:"none",color:"#a78bfa",fontSize:18,cursor:"pointer",padding:"4px 8px"}}>←</button><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search..." autoFocus style={{flex:1,padding:"10px 12px",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,color:"#ccc",fontSize:13,fontFamily:"'DM Mono',monospace",outline:"none"}}/></div><div style={{overflowY:"auto",display:"flex",flexDirection:"column",gap:4,flex:1}}>{filtered.map(c=><button key={c} onClick={()=>{if(pick==="from")setFc(c);else setTc(c);setPick(null);setSearch("");}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:(pick==="from"?fc:tc)===c?"rgba(167,139,250,0.1)":"transparent",border:(pick==="from"?fc:tc)===c?"1px solid rgba(167,139,250,0.2)":"1px solid transparent",borderRadius:8,cursor:"pointer",color:"#ccc",fontFamily:"'DM Mono',monospace",fontSize:13,textAlign:"left",width:"100%"}}><span style={{fontSize:20}}>{CURRENCY_DATA[c].flag}</span><span style={{fontWeight:600}}>{c}</span><span style={{color:"#666",fontSize:11}}>{CURRENCY_DATA[c].name}</span></button>)}</div></div>);
-  return(<div style={{padding:16,display:"flex",flexDirection:"column",gap:12,flex:1,overflowY:"auto"}}><div style={{textAlign:"center",fontSize:10,color:"#777"}}>⚠ Approximate offline rates · as of {CURRENCY_RATES_DATE} · not live</div><div style={{background:"rgba(255,255,255,0.02)",borderRadius:12,padding:14,border:"1px solid rgba(255,255,255,0.05)"}}><div style={{fontSize:10,color:"#666",marginBottom:8,textTransform:"uppercase",letterSpacing:1}}>From</div><input value={amt} onChange={e=>setAmt(e.target.value)} type="number" inputMode="decimal" style={{width:"100%",padding:"10px 0",background:"transparent",border:"none",outline:"none",color:"#fff",fontSize:28,fontFamily:"'DM Mono',monospace",fontWeight:600,boxSizing:"border-box"}}/><CB code={fc} onClick={()=>setPick("from")}/></div><div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:12}}><div style={{fontSize:11,color:"#555"}}>1 {fc} = {rate} {tc}</div><button onClick={()=>{setFc(tc);setTc(fc);}} style={{width:40,height:40,borderRadius:"50%",background:"rgba(167,139,250,0.1)",border:"1px solid rgba(167,139,250,0.2)",color:"#a78bfa",cursor:"pointer",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center"}}>⇅</button></div><div style={{background:"rgba(255,255,255,0.02)",borderRadius:12,padding:14,border:"1px solid rgba(255,255,255,0.05)"}}><div style={{fontSize:10,color:"#666",marginBottom:8,textTransform:"uppercase",letterSpacing:1}}>To</div><div style={{fontSize:28,fontWeight:600,color:"#a78bfa",fontFamily:"'DM Mono',monospace",padding:"10px 0",minHeight:50}}>{result||"—"}</div><CB code={tc} onClick={()=>setPick("to")}/></div></div>);
+  return(<div style={{padding:16,display:"flex",flexDirection:"column",gap:12,flex:1,overflowY:"auto"}}><div style={{textAlign:"center",fontSize:10,color:"#777"}}>⚠ Approximate offline rates · as of {CURRENCY_RATES_DATE} · not live</div><div style={{background:"rgba(255,255,255,0.02)",borderRadius:12,padding:14,border:"1px solid rgba(255,255,255,0.05)"}}><div style={{fontSize:10,color:"#666",marginBottom:8,textTransform:"uppercase",letterSpacing:1}}>From</div><input value={amt} onChange={e=>setAmt(e.target.value)} type="number" inputMode="decimal" style={{width:"100%",padding:"10px 0",background:"transparent",border:"none",outline:"none",color:"#fff",fontSize:28,fontFamily:"'DM Mono',monospace",fontWeight:600,boxSizing:"border-box"}}/><CB code={fc} onClick={()=>setPick("from")}/></div><div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:12}}><div style={{fontSize:11,color:"#555"}}>1 {fc} = {rate} {tc}</div><button onClick={()=>{setFc(tc);setTc(fc);}} style={{width:40,height:40,borderRadius:"50%",background:"rgba(167,139,250,0.1)",border:"1px solid rgba(167,139,250,0.2)",color:"#a78bfa",cursor:"pointer",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center"}}>⇅</button></div><div style={{background:"rgba(255,255,255,0.02)",borderRadius:12,padding:14,border:"1px solid rgba(255,255,255,0.05)"}}><div style={{fontSize:10,color:"#666",marginBottom:8,textTransform:"uppercase",letterSpacing:1}}>To</div><div style={{fontSize:28,fontWeight:600,color:"#a78bfa",fontFamily:"'DM Mono',monospace",padding:"10px 0",minHeight:50}}>{result||"–"}</div><CB code={tc} onClick={()=>setPick("to")}/></div></div>);
 }
 
 
@@ -97,14 +224,14 @@ export function BasePanel() {
         </div>
         <input value={val} onChange={e => setVal(e.target.value)} inputMode={base === 10 ? "numeric" : "text"} spellCheck={false} autoCapitalize="characters"
           style={{ width: "100%", padding: "8px 0", background: "transparent", border: "none", outline: "none", color: out ? "#fff" : "#ef4444", fontSize: 28, fontFamily: "'DM Mono',monospace", fontWeight: 600, boxSizing: "border-box", letterSpacing: 1 }} />
-        {!out && val.trim() !== "" && <div style={{ fontSize: 11, color: "#ef4444" }}>Not a valid base-{base} number</div>}
+        {!out && val.trim() !== "" && <div style={{ fontSize: 11, color: "#ef4444" }}>Not a valid base {base} number</div>}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {rows.map(([label, key, prefix]) => (
           <div key={key} style={{ background: "rgba(255,255,255,0.02)", borderRadius: 12, padding: "12px 14px", border: "1px solid rgba(255,255,255,0.05)", display: "flex", alignItems: "baseline", gap: 12 }}>
             <span style={{ fontSize: 10, color: "#666", textTransform: "uppercase", letterSpacing: 1, width: 34, flexShrink: 0 }}>{label}</span>
             <span style={{ fontSize: 18, fontWeight: 600, color: accent, fontFamily: "'DM Mono',monospace", wordBreak: "break-all" }}>
-              {out ? (prefix && out[key][0] !== "-" ? prefix : "") + out[key] : "—"}
+              {out ? minus((prefix && out[key][0] !== "-" ? prefix : "") + out[key]) : "–"}
             </span>
           </div>
         ))}

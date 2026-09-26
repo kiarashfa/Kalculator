@@ -6,10 +6,14 @@ import Icon from "./Icon.jsx";
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? "⌘" : "Ctrl+";
 
 const GUIDE = [
-  { icon: "pages", title: "One page per calculation", text: "Press = and the answer appears under your expression — you can still edit it. CE opens a blank page; ‹ › flip between pages. Prefer a running list? Turn Pages off in settings." },
+  { icon: "pages", title: "One page per calculation", text: "Press = and the answer appears under your expression, which stays editable. CE opens a blank page and ‹ › flip between pages. Prefer a running list? Turn Pages off in settings." },
   { icon: "hand", title: "Tap or drag to place the cursor", text: "Anywhere in the expression, before or after any digit, even inside fractions and powers. ◀ ▶ nudge it one step." },
-  { icon: "copy", title: "Copy & paste keep the math", text: "Right-click (or long-press) the display for copy, paste and LaTeX. 2^3 pastes back as 2³, (1+2)/3 as a fraction." },
+  { icon: "select", title: "Select part of an expression", text: "Drag with the mouse, use Shift and the arrow keys, or double click a slot. Then type to replace it, or press ( ÷ √ x² or a function to wrap it." },
+  { icon: "copy", title: "Copy & paste keep the math", text: "Right click (or press and hold) the display for copy, paste and LaTeX. 2^3 pastes back as 2³, and (1+2)/3 as a fraction." },
   { icon: "file", title: "Documents", text: "Pages are saved in this browser as you go. Save a document to a .kalc file to keep a copy or open it on another device." },
+  { icon: "angle", title: "Degrees or radians", text: "Tap RAD / DEG under the display to switch. Results that use trigonometry show which one they were calculated in." },
+  { icon: "sliders", title: "Number format", text: "In settings, choose the significant digits, scientific or engineering notation, and thousands separators. Every page follows." },
+  { icon: "graph", title: "Graphs stay with the document", text: "Each Graph page you calculate is a plot. In the graph, tap a function in the legend to hide or show it; + and − zoom." },
   { icon: "up", title: "ƒ shows the function keys", text: "On phones the function rows fold away for a bigger display. Tap ƒ, press ⇧, or swipe the key row above the numbers." },
   { icon: "check", title: "Hold = for an equals sign", text: "Type equations such as x² − 4 = 0 in Solve. A short press of = still calculates." },
   { icon: "eraser", title: "Hold ⌫ to clear", text: "Clears the expression on the page. Undo (↶) brings it back." },
@@ -21,7 +25,7 @@ const KEYS = [
   { group: "Type", rows: [
     [["0–9", "+", "−", "*"], "Numbers and operators"],
     [["/"], "Fraction"], [["^"], "Power"], [["( )"], "Group · ) closes the function you're in"],
-    [["sin(", "sqrt(", "pi"], "Type names — they turn into math"],
+    [["sin(", "sqrt(", "pi"], "Type names: they turn into math"],
     [["="], "Equals sign (for equations)"], [["Enter"], "Calculate"],
   ] },
   { group: "Edit", rows: [
@@ -30,8 +34,13 @@ const KEYS = [
     [["⌫", "Del"], "Delete"], [[`${MOD}Z`, `${MOD}Y`], "Undo / redo"],
     [["Esc"], "New page (Classic: clear)"],
   ] },
+  { group: "Select", rows: [
+    [["Shift+←", "Shift+→"], "Select, one whole piece at a time"],
+    [["Shift+Home", "Shift+End"], "Select to the start / end"],
+    [[`${MOD}A`], "Select all"], [["Double click"], "Select the slot under the pointer"],
+  ] },
   { group: "Clipboard", rows: [
-    [[`${MOD}C`], "Copy the expression"], [[`${MOD}X`], "Cut"], [[`${MOD}V`], "Paste (formatting kept)"],
+    [[`${MOD}C`], "Copy the selection or the expression"], [[`${MOD}X`], "Cut"], [[`${MOD}V`], "Paste (formatting kept)"],
   ] },
   { group: "Pages & documents", rows: [
     [["PgUp", "PgDn"], "Previous / next page"], [[`${MOD}S`], "Save to file"], [[`${MOD}O`], "Open a file"],
@@ -40,9 +49,9 @@ const KEYS = [
 
 // Edit this block to change the About text.
 const ABOUT = {
-  intro: "Kalculator is a free scientific calculator that writes math the way it looks on paper — fractions stacked, powers raised, roots drawn — while you type. It solves equations, draws graphs, does derivatives and integrals, converts units, currencies and number bases, and keeps your work in documents you can save and reopen.",
+  intro: "Kalculator is a free scientific calculator that writes math the way it looks on paper while you type: fractions stacked, powers raised, roots drawn. It solves equations, draws graphs, does derivatives and integrals, converts units, currencies and number bases, and keeps your work in documents you can save and reopen.",
   privacy: "It runs entirely in your browser: no account and no ads, and your calculations and documents stay on your device.",
-  dev: "Designed and built by Kiarash Farajzadehahary — Kia, the K in Kalculator. It's an independent project, made with care for everyone who counts.",
+  dev: "Designed and built by Kiarash Farajzadehahary (Kia, the K in Kalculator). It's an independent project, made with care for everyone who counts.",
   links: [
     { icon: "globe", label: "Website", href: "https://kiarashfa.github.io/website/" },
     { icon: "github", label: "GitHub", href: "https://github.com/kiarashfa" },
@@ -52,7 +61,6 @@ const ABOUT = {
     { icon: "paypal", label: "Donate with PayPal", href: "https://www.paypal.com/donate/?hosted_button_id=S3BD5XFBMMWSJ" },
     { icon: "coffee", label: "Buy me a coffee", href: "https://www.buymeacoffee.com/kiarashfa" },
   ],
-  source: "https://github.com/kiarashfa/Kalculator",
 };
 
 function Guide() {
@@ -126,10 +134,7 @@ function About() {
         </div>
       </section>
 
-      <p className="k-about-foot">
-        © {new Date().getFullYear()} Kiarash Farajzadehahary · Source-available under the KFA License 1.0 ·{" "}
-        <a href={ABOUT.source} {...ext}>Source code</a>
-      </p>
+      <p className="k-about-foot">© {new Date().getFullYear()} Kiarash Farajzadehahary</p>
     </div>
   );
 }

@@ -207,7 +207,6 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
 }
 .k-editor::-webkit-scrollbar { display: none; }
-.k-editor .m-root { font-size: var(--m-size); }
 .k-preview {
   min-height: 30px; font: 400 21px var(--font-math); font-feature-settings: "tnum";
   color: var(--ink-3); letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -336,19 +335,19 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* glyph classes */
 .m-n { color: var(--m-num); }
 .m-v { color: var(--m-var); }
-.m-o { color: var(--m-op); margin: 0 0.17em; }
-.m-o.m-u { margin: 0 0.02em 0 0; }
-.m-o.m-post { margin: 0 0.04em 0 0.01em; }
-.m-o.m-eq { margin: 0 0.3em; }
-.m-comma { color: var(--m-fence); margin-right: 0.24em; }
+.m-o { color: var(--m-op); padding: 0 0.17em; } /* padding, not margin: a selection highlight stays continuous */
+.m-o.m-u { padding: 0 0.02em 0 0; }
+.m-o.m-post { padding: 0 0.04em 0 0.01em; }
+.m-o.m-eq { padding: 0 0.3em; }
+.m-comma { color: var(--m-fence); padding-right: 0.24em; }
 .m-p { color: var(--m-fence); }
 .m-E { color: var(--m-op); font-size: 0.74em; margin: 0 0.05em; font-weight: 500; }
 .m-ans { color: var(--m-var); font-weight: 500; }
 .m-fn { color: var(--m-fn); margin-right: 0.02em; }
 .m-fsub { font-size: 0.62em; vertical-align: -0.28em; }
 .m-placeholder { color: var(--ink-4); }
-.m-sup .m-o { margin: 0 0.07em; }
-.m-sup .m-o.m-eq { margin: 0 0.12em; }
+.m-sup .m-o { padding: 0 0.07em; }
+.m-sup .m-o.m-eq { padding: 0 0.12em; }
 
 /* caret: zero-width, never reflows the expression */
 .m-caret { display: inline-block; width: 0; position: relative; }
@@ -576,3 +575,66 @@ kbd {
 .k-toast.error { border-color: rgba(239, 68, 68, 0.4); }
 .k-toast button { flex: none; border: 0; background: none; color: var(--accent); font: 700 12px var(--font-ui); cursor: pointer; padding: 4px 6px; border-radius: 6px; }
 .k-toast button:hover { background: rgba(255, 255, 255, 0.06); }
+
+/* ═══ Round 3: selection, angle mode, number settings, graph ══════════════ */
+/* selected part of an expression (whole siblings of one slot) */
+.m-root [data-sel] {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: 0 0 0 0.04em color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 0.06em;
+}
+/* long expressions shrink to fit (the scale is set per render on .k-editor) */
+.k-editor .m-root { font-size: calc(var(--m-size) * var(--fit, 1)); }
+
+/* settings: segmented rows; the popover scrolls on short screens */
+.k-pop { max-height: calc(100dvh - 70px); overflow-y: auto; overscroll-behavior: contain; }
+.k-pop-title + .k-pop-title, .k-toggle + .k-pop-title, .k-seg-row + .k-pop-title { margin-top: 6px; border-top: 1px solid var(--line); padding-top: 12px; }
+.k-seg-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 10px; font: 500 12.5px var(--font-ui); color: #d4d6de; }
+.k-seg { display: flex; gap: 2px; padding: 2px; border-radius: 9px; background: rgba(255, 255, 255, 0.05); }
+.k-seg button {
+  min-width: 34px; padding: 5px 8px; border: 0; border-radius: 7px; background: transparent; cursor: pointer;
+  color: #8a8e9e; font: 600 11px var(--font-ui);
+}
+.k-seg button:hover { color: #e0e2ea; }
+.k-seg button.on { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
+
+/* angle mode: a chip in the page bar (Pages) / display tools (Classic) */
+.k-anglechip {
+  height: 24px; padding: 0 8px; border-radius: 7px; cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.08); background: rgba(10, 10, 15, 0.82);
+  color: #8a8e9e; font: 700 10px var(--font-ui); letter-spacing: 0.08em;
+}
+.k-anglechip:hover { color: #e4e6ee; }
+.k-disp-tools .k-anglechip { height: 28px; }
+.k-pagemid { justify-self: center; display: flex; align-items: center; gap: 4px; }
+.k-angletag {
+  align-self: center; padding: 1px 6px; border-radius: 5px; font: 700 9.5px var(--font-ui); letter-spacing: 0.08em;
+  color: #7c8091; background: rgba(255, 255, 255, 0.06);
+}
+
+/* graph overlay */
+.k-graph { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; background: #0a0a0f; }
+.k-graph-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); flex: none; }
+.k-graph-title { font: 700 13px var(--font-ui); color: #34d399; letter-spacing: 0.06em; text-transform: uppercase; }
+.k-graph-title em { margin-left: 6px; font-style: normal; font-size: 10px; color: #7c8091; }
+.k-graph-actions { display: flex; gap: 6px; }
+.k-graph-actions .k-btn { --accent: #34d399; }
+.k-zoom { min-width: 34px; font-size: 16px; line-height: 1; padding: 5px 0; }
+.k-graph-body { position: relative; flex: 1; min-height: 0; }
+.k-graph-body canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+.k-graph-legend {
+  position: absolute; top: 10px; left: 10px; max-width: calc(100% - 20px); max-height: 45%; overflow-y: auto;
+  list-style: none; margin: 0; padding: 4px; display: grid; gap: 2px;
+  background: rgba(10, 10, 15, 0.86); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px;
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.k-graph-legend button {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 8px; border: 0; border-radius: 8px;
+  background: transparent; cursor: pointer; text-align: left; color: #d8dae2;
+}
+.k-graph-legend button:hover { background: rgba(255, 255, 255, 0.05); }
+.k-graph-legend button.off { opacity: 0.35; }
+.k-graph-legend .m-root { font-size: 17px; white-space: nowrap; }
+.k-swatch { flex: none; width: 10px; height: 10px; border-radius: 3px; }
+.k-legend-y { font: 400 15px var(--font-math); color: #8a8e9e; }
+.k-graph-empty { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); margin: 0; font: 400 13px var(--font-ui); color: #6b6f80; text-align: center; padding: 0 20px; }

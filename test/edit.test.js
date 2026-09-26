@@ -187,3 +187,59 @@ test("cloneTree deep-copies with fresh ids", () => {
   assert.notEqual(c.children[0].num.id, root.children[0].num.id);
   assert.equal(findSeq(c, root.children[0].num.id), null);
 });
+
+// ─── Selection ──────────────────────────────────────────────────────────────
+import { selectionRange, selStep, rangeNodes, deleteRange, wrapRange } from "../src/mathEdit.js";
+
+// select `n` steps left from the end of what `keys` typed (Shift+← n times)
+function selectLeft(keys, n) {
+  const { root, cur } = run(keys);
+  let focus = cur;
+  for (let i = 0; i < n; i++) focus = selStep(root, focus, -1);
+  return { root, r: selectionRange(root, cur, focus) };
+}
+
+test("Shift+← selects whole siblings; nothing selected is null", () => {
+  const { root, r } = selectLeft(["1", "2", "+", "3"], 2);
+  assert.equal(toExpr({ type: "seq", children: rangeNodes(root, r) }), "+3");
+  assert.equal(selectionRange(root, { seqId: root.id, pos: 1 }, { seqId: root.id, pos: 1 }), null);
+});
+
+test("a selection never cuts a structure: numerator ↔ denominator takes the whole fraction", () => {
+  const { root } = run(["1", "+", "3", "/", "4"]);
+  const frac = root.children[2];
+  const r = selectionRange(root, { seqId: frac.num.id, pos: 1 }, { seqId: frac.den.id, pos: 0 });
+  assert.deepEqual([r.seqId, r.start, r.end], [root.id, 2, 3]);
+});
+
+test("stepping out of a slot widens the selection to its structure", () => {
+  const { root, cur } = run(["2", "+", "sin", "3", "0"]); // caret inside sin( )
+  let f = cur;
+  for (let i = 0; i < 3; i++) f = selStep(root, f, -1); // past "30", then out of sin
+  const r = selectionRange(root, cur, f);
+  assert.equal(toExpr({ type: "seq", children: rangeNodes(root, r) }), "sin(30)");
+});
+
+test("keys act on a selection as a whole", () => {
+  const wrap = (kind, arg) => {
+    const { root, r } = selectLeft(["1", "+", "2"], 3);
+    wrapRange(root, r, kind, arg);
+    return toExpr(root);
+  };
+  assert.equal(wrap("paren"), "(1+2)");
+  assert.equal(wrap("frac"), "((1+2)/())");
+  assert.equal(wrap("recip"), "((1)/(1+2))");
+  assert.equal(wrap("sqrt"), "sqrt(1+2)");
+  assert.equal(wrap("func", "sin"), "sin(1+2)");
+  assert.equal(wrap("pow", "2"), "(1+2)^(2)");
+  const one = selectLeft(["1", "2"], 2);
+  wrapRange(one.root, one.r, "pow", "2");
+  assert.equal(toExpr(one.root), "12^(2)"); // a plain number needs no parentheses
+});
+
+test("deleting a selection leaves the caret where it was", () => {
+  const { root, r } = selectLeft(["1", "2", "+", "3"], 2);
+  const c = deleteRange(root, r);
+  assert.equal(toExpr(root), "12");
+  assert.equal(c.pos, 2);
+});

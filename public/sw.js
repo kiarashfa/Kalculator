@@ -9,7 +9,7 @@ const CACHE = "kalculator-v2";
 // first time while offline (help, about, documents) still show their icons.
 // Keep in sync with public/icons/ui/.
 const ICONS = [
-  "backspace", "bulb", "check", "close", "code", "coffee", "copy", "cut", "dots", "duplicate", "edit", "eraser", "file", "file-plus", "folder", "github", "globe", "hand", "heart", "info", "keyboard", "left", "mail", "pages", "paste", "paypal", "plus", "redo", "right", "save", "sliders", "trash", "undo", "up"
+  "backspace", "angle", "bulb", "check", "close", "code", "coffee", "copy", "cut", "dots", "duplicate", "edit", "eraser", "file", "file-plus", "folder", "github", "globe", "graph", "hand", "heart", "info", "keyboard", "left", "mail", "pages", "paste", "paypal", "plus", "redo", "right", "save", "select", "sliders", "trash", "undo", "up"
 ].map((n) => `icons/ui/${n}.svg`);
 
 self.addEventListener("install", (event) => {

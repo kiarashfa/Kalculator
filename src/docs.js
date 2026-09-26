@@ -8,7 +8,8 @@
 //   doc  = { id, name, createdAt, updatedAt, current, vars: {A: 2.5, …}, pages }
 //   page = { id, mode, tree, out }
 //   out  = { expr, mode, type: "calc"|"solve"|"graph"|"error", result,
-//            value?, fraction?, solutions?, showDecimal?, op? }
+//            value?, fraction?, solutions?, showDecimal?, op?,
+//            angle? ("deg"|"rad" when trig was involved), hidden? (graph plot off) }
 //
 // Documents are kept in the browser (docStore.js) and saved to / opened from
 // .kalc files: JSON that also carries each page as readable text.
@@ -102,6 +103,8 @@ export function sanitizeOut(out) {
   if (str(out.fraction, 80)) clean.fraction = str(out.fraction, 80);
   if (Array.isArray(out.solutions)) clean.solutions = out.solutions.filter((s) => typeof s === "string").slice(0, 60).map((s) => s.slice(0, 120));
   if (out.showDecimal === true) clean.showDecimal = true;
+  if (out.angle === "deg" || out.angle === "rad") clean.angle = out.angle;
+  if (out.hidden === true) clean.hidden = true;
   if (out.op && (out.op.kind === "int" || out.op.kind === "d")) {
     clean.op = { kind: out.op.kind, a: str(out.op.a, 40) ?? "0" };
     if (out.op.kind === "int") clean.op.b = str(out.op.b, 40) ?? "1";

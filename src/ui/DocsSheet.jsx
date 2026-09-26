@@ -51,7 +51,7 @@ export default function DocsSheet({ current, pageCount, docs, persistent, fileNa
 
   return (
     <Sheet title="Documents" onClose={onClose} className="k-docs"
-      subtitle={persistent ? "Saved automatically in this browser" : "This browser can't keep documents — save to a file before you leave"}>
+      subtitle={persistent ? "Saved automatically in this browser" : "This browser can't keep documents. Save to a file before you leave."}>
       <section className="k-doc-current">
         <div className="k-doc-name">
           <Icon name="file" size={18} />

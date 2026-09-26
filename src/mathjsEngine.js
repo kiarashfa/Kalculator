@@ -22,13 +22,40 @@ export function createMathEngine(math, mathFrac) {
     return null; // Unit, Matrix, boolean, … — not representable yet
   }
 
+  // ── Angle mode ──
+  // In degree mode the trig functions travel in the evaluation scope, which
+  // math.js consults before its own functions — so every path (results,
+  // graphs, solving, calculus) follows the mode. Multiples of 90° are exact:
+  // sin 180° = 0 and tan 90° is undefined, rather than 1.2e-16 / 1.6e16.
+  const D2R = Math.PI / 180;
+  const toRad = (x) => (typeof x === "number" ? x * D2R : math.multiply(x, D2R));
+  const toDeg = (r) => (typeof r === "number" ? r / D2R : math.multiply(r, 1 / D2R));
+  const quarter = (x) => (typeof x === "number" && Number.isFinite(x) && x % 90 === 0 ? (((x / 90) % 4) + 4) % 4 : -1);
+  const exact = (table, fn) => (x) => { const q = quarter(x); return q >= 0 ? table[q] : fn(toRad(x)); };
+  const DEGREE_FNS = {
+    sin: exact([0, 1, 0, -1], math.sin),
+    cos: exact([1, 0, -1, 0], math.cos),
+    tan: exact([0, NaN, 0, NaN], math.tan),
+    cot: exact([NaN, 0, NaN, 0], math.cot),
+    sec: exact([1, NaN, -1, NaN], math.sec),
+    asin: (x) => toDeg(math.asin(x)),
+    acos: (x) => toDeg(math.acos(x)),
+    atan: (x) => toDeg(math.atan(x)),
+    acot: (x) => toDeg(math.acot(x)),
+    asec: (x) => toDeg(math.asec(x)),
+  };
+  let angleFns = null; // null = radians (math.js default)
+  function setAngle(mode) { angleFns = mode === "deg" ? DEGREE_FNS : null; }
+  const getAngle = () => (angleFns ? "deg" : "rad");
+  const withAngle = (scope) => (angleFns ? { ...scope, ...angleFns } : scope);
+
   function scopeFrom(vars) {
     // Pass through any provided scope variables (x, ans, and user vars A/B/C/…),
     // dropping undefined/null; `ans` defaults to 0.
     const s = {};
     if (vars) for (const k in vars) { const v = vars[k]; if (v !== undefined && v !== null) s[k] = v; }
     if (s.ans === undefined) s.ans = 0;
-    return s;
+    return withAngle(s);
   }
 
   function evaluate(expr, vars = {}) {
@@ -70,7 +97,7 @@ export function createMathEngine(math, mathFrac) {
       // Some functions (e.g. mode) return a set of values → show them comma-joined.
       const arr = t === "Matrix" ? r.toArray() : r;
       const nums = arr.map(coerceReal).filter((v) => v !== null);
-      if (nums.length) return { kind: "real", value: nums[0], display: nums.map(fmt).join(", ") };
+      if (nums.length) return { kind: "real", value: nums[0], multi: nums.length > 1, display: nums.map(fmt).join(", ") };
     }
     return { kind: "error" };
   }
@@ -85,7 +112,7 @@ export function createMathEngine(math, mathFrac) {
     }
     return (scope) => {
       try {
-        return coerceReal(node.evaluate(scope));
+        return coerceReal(node.evaluate(withAngle(scope)));
       } catch {
         return null;
       }
@@ -110,14 +137,46 @@ export function createMathEngine(math, mathFrac) {
     return r.toFraction(); // "n/d" (sign included)
   }
 
-  // Number formatting — unchanged from the legacy engine (pure, no math.js).
+  // ── Number formatting ──
+  // digits: significant digits (6/10/12/15) · notation: "auto" (plain, with
+  // whole numbers in full and tiny/huge values scientific), "sci" or "eng"
+  // (exponent a multiple of 3) · grouping: 1,234,567 separators.
+  let FORMAT = { digits: 12, notation: "auto", grouping: true };
+  function setFormat(opts) { FORMAT = { ...FORMAT, ...opts }; }
+  const group = (s) => {
+    if (!FORMAT.grouping) return s;
+    const [int, frac] = s.split(".");
+    const sign = int.startsWith("-") ? "-" : "";
+    const body = sign ? int.slice(1) : int;
+    return sign + body.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + (frac !== undefined ? "." + frac : "");
+  };
+  const trim = (m) => (m.includes(".") ? m.replace(/0+$/, "").replace(/\.$/, "") : m);
+  const plain = (n, digits) => {
+    const s = String(parseFloat(n.toPrecision(digits)));
+    return /e/i.test(s) ? sci(n, digits) : group(s);
+  };
+  function sci(n, digits) {
+    const [m, e] = n.toExponential(Math.max(0, digits - 1)).split("e");
+    return `${trim(m)}e${Number(e)}`;
+  }
+  function eng(n, digits) {
+    let e = Math.floor(Math.log10(Math.abs(n)) / 3) * 3;
+    let m = parseFloat((n / 10 ** e).toPrecision(digits));
+    if (Math.abs(m) >= 1000) { m /= 1000; e += 3; } // 999.9995 rounded up
+    const ms = group(trim(String(parseFloat(m.toPrecision(digits)))));
+    return e === 0 ? ms : `${ms}e${e}`;
+  }
   function fmt(n) {
     if (n === null || n === undefined) return "Error";
-    if (Number.isNaN(n)) return "Undefined"; // e.g. 0/0, ∞−∞ — clearer than "Error"
+    if (Number.isNaN(n)) return "Undefined"; // e.g. 0/0, ∞−∞: clearer than "Error"
     if (!isFinite(n)) return n > 0 ? "∞" : "-∞";
-    if (Number.isInteger(n) && Math.abs(n) < 1e15) return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
-    if (Math.abs(n) < 0.0001 || Math.abs(n) > 1e12) return n.toExponential(8);
-    return parseFloat(n.toPrecision(12)).toString();
+    if (n === 0) return "0";
+    const abs = Math.abs(n), d = FORMAT.digits;
+    if (FORMAT.notation === "sci") return sci(n, d);
+    if (FORMAT.notation === "eng") return eng(n, d);
+    if (Number.isInteger(n) && abs < 1e15) return group(String(n));
+    if (abs < 1e-4 || abs >= 1e12) return sci(n, d);
+    return plain(n, d);
   }
 
   function suggest(expr) {
@@ -171,7 +230,7 @@ export function createMathEngine(math, mathFrac) {
       const reps = roots
         .slice().sort((a, b) => Math.abs(a) - Math.abs(b)).slice(0, 4).sort((a, b) => a - b)
         .map((r) => formatRoot({ re: r, im: 0, mult: 1 })).join(", ");
-      return { kind: "fallback", display: `x ≈ ${reps}, … (infinitely many — periodic)`, solutions: strs };
+      return { kind: "fallback", display: `x ≈ ${reps}, … (infinitely many: periodic)`, solutions: strs };
     }
     if (roots.length > 10) {
       return { kind: "fallback", display: `x ≈ ${strs.slice(0, 10).join(", ")}, … (${strs.length} found in ${range})`, solutions: strs };
@@ -200,5 +259,5 @@ export function createMathEngine(math, mathFrac) {
     return pts;
   }
 
-  return { evaluate, evalRich, compileFn, fmt, suggest, solve, graphPts, exactFraction, numDerivative, numIntegral };
+  return { evaluate, evalRich, compileFn, fmt, setFormat, setAngle, getAngle, suggest, solve, graphPts, exactFraction, numDerivative, numIntegral };
 }

@@ -1,11 +1,11 @@
 {
   "name": "Kalculator",
   "short_name": "Kalculator",
-  "description": "Smart scientific calculator — natural math rendering, equation solver, graphing, unit & currency converters.",
+  "description": "Smart scientific calculator with natural math rendering, an equation solver, graphing, and unit & currency converters.",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",
-  "orientation": "portrait",
+  "orientation": "any",
   "background_color": "#0a0a0f",
   "theme_color": "#0a0a0f",
   "icons": [

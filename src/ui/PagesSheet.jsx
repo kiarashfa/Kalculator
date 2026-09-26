@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import Sheet from "./Sheet.jsx";
 import Icon from "./Icon.jsx";
 import MathView from "../MathView.jsx";
-import { prettyNum } from "./Result.jsx";
+import { prettyNum, shownResult } from "./Result.jsx";
 import { isBlank, isFresh, MAX_PAGES } from "../docs.js";
 
 const MODE_TAG = { solve: "Solve", graph: "Graph", calculus: "∫dx" };
@@ -28,7 +28,7 @@ export default function PagesSheet({ docName, pages, current, onGo, onDelete, on
                   {isBlank(p) ? <span className="k-pagerow-blank">Blank page</span> : <MathView root={p.tree} />}
                   <span className="k-pagerow-res">
                     {MODE_TAG[p.mode] && <em>{MODE_TAG[p.mode]}</em>}
-                    {fresh && p.out.type !== "graph" ? (p.out.type === "calc" ? "= " : "") + prettyNum(p.out.solutions?.length ? `x = ${p.out.solutions.join(", ")}` : p.out.result) : ""}
+                    {fresh && p.out.type !== "graph" ? (p.out.type === "calc" ? "= " : "") + prettyNum(p.out.solutions?.length ? `x = ${p.out.solutions.join(", ")}` : shownResult(p.out)) : ""}
                   </span>
                 </span>
               </button>

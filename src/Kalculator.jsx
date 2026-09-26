@@ -9,9 +9,9 @@ import {
   MAX_PAGES, MATH_MODES, uid, newDoc, newPage, isBlank, isBlankDoc, isFresh, lastValue,
   uniqueName, cleanName, fileNameFor, toFile, parseFile, docFromHistory, sanitizeDoc,
 } from "./docs.js";
-import { GraphView, UnitPanel, CurrencyPanel, BasePanel } from "./panels.jsx";
+import { GraphView, UnitPanel, CurrencyPanel, BasePanel, PLOT_COLORS } from "./panels.jsx";
 import Icon from "./ui/Icon.jsx";
-import Result, { prettyNum, plainNum } from "./ui/Result.jsx";
+import Result, { prettyNum, plainNum, shownResult } from "./ui/Result.jsx";
 import InfoSheet from "./ui/InfoSheet.jsx";
 import DocsSheet from "./ui/DocsSheet.jsx";
 import PagesSheet from "./ui/PagesSheet.jsx";
@@ -21,7 +21,10 @@ import { useToasts, Toasts } from "./ui/Toasts.jsx";
 // ─── Preferences (per viewer, not calculation data) → localStorage ──────────
 const SETTINGS_KEY = "kalculator.settings";
 const SETTINGS_VERSION = 2;
-const DEFAULT_SETTINGS = { v: SETTINGS_VERSION, pages: true, suggest: false, preview: true, fnOpen: false };
+const DEFAULT_SETTINGS = {
+  v: SETTINGS_VERSION, pages: true, suggest: false, preview: true, fnOpen: false,
+  angle: "rad", digits: 12, notation: "auto", grouping: true,
+};
 function loadSettings() {
   try {
     const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
@@ -106,6 +109,19 @@ function SettingToggle({ on, onChange, label, hint }) {
   );
 }
 
+function Segmented({ label, options, value, onChange }) {
+  return (
+    <div className="k-seg-row">
+      <span>{label}</span>
+      <div className="k-seg" role="radiogroup" aria-label={label}>
+        {options.map(([v, text]) => (
+          <button key={v} role="radio" aria-checked={value === v} className={value === v ? "on" : ""} onClick={() => onChange(v)}>{text}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════════════════
@@ -114,6 +130,10 @@ export default function Kalculator() {
   const setSetting = (k, v) => setSettings((s) => ({ ...s, [k]: v }));
   useEffect(() => saveSettings(settings), [settings]);
   const pagesMode = settings.pages;
+  // The engine is a module singleton; configure it before anything below
+  // evaluates during this render (idempotent assignments).
+  MathEngine.setAngle(settings.angle);
+  MathEngine.setFormat({ digits: settings.digits, notation: settings.notation, grouping: settings.grouping });
   const wide = useMedia(WIDE_QUERY);
   const fnOpen = wide || settings.fnOpen;
   const setFnOpen = (v) => setSetting("fnOpen", v);
@@ -138,7 +158,6 @@ export default function Kalculator() {
   const [mode, setMode] = useState("calc");
   const [lastAns, setLastAns] = useState(0);
   const [vars, setVarsState] = useState({}); // A, B, C, D, M → value (number | Complex)
-  const [graphExprs, setGraphExprs] = useState([]);
   const [showGraph, setShowGraph] = useState(false);
   const [layer, setLayer] = useState(0); // keypad layer: 0 basic · 1 2nd · 2 3rd
   const [caA, setCaA] = useState("0"); // calculus: derivative point / integral lower bound
@@ -175,7 +194,7 @@ export default function Kalculator() {
       storedIds.current.add(d.id);
       if (saveFailed) setSaveFailed(false);
     } catch {
-      if (!saveFailed) toast("Couldn't save in this browser — use Save to file to keep your work", { tone: "error", ms: 6000 });
+      if (!saveFailed) toast("Couldn't save in this browser. Use Save to file to keep your work.", { tone: "error", ms: 6000 });
       setSaveFailed(true);
     }
   }
@@ -252,7 +271,7 @@ export default function Kalculator() {
         storedIds.current.add(d.id);
         if (isBlankDoc(docRef.current)) openDoc(d); else touch(); // typed before storage answered: keep that
       } else if (!Store.persistent) {
-        toast("This browser can't keep documents (private window?) — use Save to file", { ms: 6000 });
+        toast("This browser can't keep documents (private window?). Use Save to file.", { ms: 6000 });
       }
       Store.requestPersistence();
     })();
@@ -301,22 +320,59 @@ export default function Kalculator() {
     touch();
     bump();
   }
-  // An editing op (undoable) — op(tree, caret) → caret, from mathEdit.js.
+  // An editing op (undoable): op(tree, caret) → caret, from mathEdit.js.
   function edit(op) {
     record();
     curRef.current = op(curPage().tree, curRef.current) || curRef.current;
+    selRef.current = null;
     edited();
+  }
+  // An insertion that replaces the selection, if there is one.
+  function editSel(op) {
+    const r = selRange();
+    edit((t, c) => op(t, r ? Ed.deleteRange(t, r) : c));
   }
   // A caret move (not undoable). Returns false when the op had nowhere to go.
   function nav(op) {
     const next = op(curPage().tree, curRef.current);
     if (!next) return false;
     curRef.current = next;
+    selRef.current = null;
     bump();
     return true;
   }
+
+  // ── Selection ──
+  // { anchor, focus } carets; the highlighted range is always whole siblings
+  // of one slot (Ed.selectionRange), so it never cuts a structure in half.
+  const selRef = useRef(null);
+  const selRange = () => (selRef.current ? Ed.selectionRange(curPage().tree, selRef.current.anchor, selRef.current.focus) : null);
+  function select(anchor, focus) {
+    selRef.current = { anchor, focus };
+    curRef.current = focus;
+    bump();
+  }
+  function extendSel(move) {
+    const anchor = selRef.current?.anchor ?? curRef.current;
+    const focus = move(curPage().tree, selRef.current?.focus ?? curRef.current);
+    if (focus) select(anchor, focus);
+  }
+  function selectAll() {
+    const t = curPage().tree;
+    if (t.children.length) select(Ed.startOf(t), Ed.endOf(t));
+  }
+  // ← / → with a selection: drop it, caret at that end
+  function collapseSel(dir) {
+    const r = selRange();
+    selRef.current = null;
+    if (r) curRef.current = { seqId: r.seqId, pos: dir < 0 ? r.start : r.end };
+    bump();
+  }
+  // Keys that act on a selection as a whole
+  const SEL_WRAP = { "(": ["paren"], "/": ["frac"], "^": ["pow", null], sq: ["pow", "2"], cube: ["pow", "3"], "1/x": ["recip"], sqrt: ["sqrt"] };
   function setTree(tree, caret) {
     record();
+    selRef.current = null;
     curPage().tree = tree;
     curRef.current = caret || Ed.endOf(tree);
     edited();
@@ -328,6 +384,7 @@ export default function Kalculator() {
     const s = u[from].pop();
     curPage().tree = s.tree;
     curRef.current = s.cur;
+    selRef.current = null;
     setEvalError(null);
     touch();
     bump();
@@ -345,6 +402,7 @@ export default function Kalculator() {
     idxRef.current = Math.max(0, Math.min(d.pages.length - 1, i));
     const p = curPage();
     curRef.current = Ed.endOf(p.tree);
+    selRef.current = null;
     if (isMathMode(mode)) setMode(p.mode);
     if (p.out?.op) { setCaA(p.out.op.a); if (p.out.op.b !== undefined) setCaB(p.out.op.b); }
     justEvalRef.current = false;
@@ -362,7 +420,7 @@ export default function Kalculator() {
     next.pages[0].mode = pageMode;
     flushSave();
     openDoc(next);
-    toast(`“${d.name}” is full (${MAX_PAGES} pages) — continuing in “${next.name}”`, { ms: 6000 });
+    toast(`“${d.name}” is full (${MAX_PAGES} pages). Continuing in “${next.name}”.`, { ms: 6000 });
     return false;
   }
   // CE: a blank page to type on (the page just left is kept as it is).
@@ -452,10 +510,7 @@ export default function Kalculator() {
     if (r.error) { setEvalError(r.error); return; } // the expression stays so it can be fixed
     p.out = { ...r.out, ...(p.out?.showDecimal && p.out.expr === r.out.expr ? { showDecimal: true } : {}) };
     if (r.ans !== undefined) setLastAns(r.ans);
-    if (p.mode === "graph") {
-      setGraphExprs((g) => (g.includes(r.out.expr) ? g : [...g, r.out.expr]));
-      setShowGraph(true);
-    }
+    if (p.mode === "graph") setShowGraph(true); // the page is now one of the document's plots
     setEvalError(null);
     setStoreArmed(null);
     if (!pagesMode && appendPage(p.mode)) {
@@ -469,21 +524,29 @@ export default function Kalculator() {
 
   // ── Keys ──
   function pressKey(k) {
+    const r = selRange();
+    if (r) { // a selection: delete it, move off it, or wrap it
+      if (k === "⌫") { edit((t) => Ed.deleteRange(t, r)); return; }
+      if (k === "◀" || k === "▶") { collapseSel(k === "◀" ? -1 : 1); return; }
+      const w = SEL_WRAP[k] || (FUNC_NAMES.includes(k) ? ["func", k] : null);
+      if (w) { edit((t) => Ed.wrapRange(t, r, ...w)); return; }
+    }
     switch (k) {
       case "=": calculate(); return;
-      case "EQ": edit((t, c) => Ed.insertChar(t, c, "=")); return; // hold "=": an equals sign
+      case "EQ": editSel((t, c) => Ed.insertChar(t, c, "=")); return; // hold "=": an equals sign
       case "AC": if (pagesMode) newPageCmd(); else clearAll(); return;
       case "CLR": clearAll(); return; // hold ⌫
       case "⌫": edit(Ed.backspace); return;
       case "◀": nav(Ed.moveLeft); return;
       case "▶": nav(Ed.moveRight); return;
-      case "ANS": edit((t, c) => Ed.insertChar(t, c, "ans")); return;
+      case "ANS": editSel((t, c) => Ed.insertChar(t, c, "ans")); return;
       case "(": edit((t, c) => Ed.openParen(t, c, FUNC_NAMES)); return;
       case ")": nav(Ed.closeParen); return;
       default: break;
     }
     const fromAns = justEvalRef.current && mode === "calc" && CONTINUES_ANS.has(k) && isBlank(curPage());
     edit((t, c) => {
+      if (r) c = Ed.deleteRange(t, r); // typing replaces the selection
       if (fromAns) { t.children.push(mkChar("ans")); c = Ed.endOf(t); }
       if (k === "/") return Ed.insertStruct(t, c, "frac");
       if (k === "^") return Ed.insertExponent(t, c, null);
@@ -497,7 +560,16 @@ export default function Kalculator() {
   }
 
   // ── Clipboard ──
-  const exprText = () => toText(curPage().tree);
+  // What copy / cut take: the selection if there is one, else the expression.
+  const copySource = () => {
+    const r = selRange();
+    return r ? { type: "seq", children: Ed.rangeNodes(curPage().tree, r) } : curPage().tree;
+  };
+  const exprText = () => toText(copySource());
+  function cutNow() {
+    const r = selRange();
+    if (r) edit((t) => Ed.deleteRange(t, r)); else clearAll();
+  }
   async function copyText(text, key = null, what = "Copied") {
     if (!text) return;
     const ok = await copyToClipboard(text);
@@ -509,7 +581,7 @@ export default function Kalculator() {
   async function pasteFromClipboard() {
     try {
       const text = await navigator.clipboard.readText();
-      if (text) edit((t, c) => Ed.insertText(t, c, text));
+      if (text) editSel((t, c) => Ed.insertText(t, c, text));
     } catch {
       toast(`Press ${MOD}V to paste`);
     }
@@ -517,7 +589,7 @@ export default function Kalculator() {
   const resultText = (p) => {
     if (!p?.out || !isFresh(p)) return "";
     if (p.out.solutions?.length) return p.out.solutions.map(plainNum).join(", ");
-    return plainNum(p.out.fraction && !p.out.showDecimal ? p.out.fraction : p.out.result);
+    return plainNum(p.out.fraction && !p.out.showDecimal ? p.out.fraction : shownResult(p.out));
   };
 
   // ── Context menu (right-click / long-press) ──
@@ -528,11 +600,13 @@ export default function Kalculator() {
     const empty = isBlank(p);
     const items = [];
     if (target === "editor") {
+      const part = selRange() ? "Selection" : "Expression";
       items.push(
-        { label: "Copy", icon: "copy", hint: `${MOD}C`, disabled: empty, run: () => copyText(exprText(), null, "Expression copied") },
-        { label: "Cut", icon: "cut", hint: `${MOD}X`, disabled: empty, run: () => { copyText(exprText(), null, "Expression cut"); clearAll(); } },
+        { label: "Copy", icon: "copy", hint: `${MOD}C`, disabled: empty, run: () => copyText(exprText(), null, `${part} copied`) },
+        { label: "Cut", icon: "cut", hint: `${MOD}X`, disabled: empty, run: () => { copyText(exprText(), null, `${part} cut`); cutNow(); } },
         { label: "Paste", icon: "paste", hint: `${MOD}V`, run: pasteFromClipboard },
-        { label: "Copy as LaTeX", icon: "code", disabled: empty, run: () => copyText(toLatex(p.tree), null, "LaTeX copied") },
+        { label: "Copy as LaTeX", icon: "code", disabled: empty, run: () => copyText(toLatex(copySource()), null, "LaTeX copied") },
+        { label: "Select all", icon: "select", hint: `${MOD}A`, disabled: empty, run: selectAll },
       );
       if (resultText(p)) items.push({ label: "Copy result", icon: "copy", run: () => copyText(resultText(p), null, "Result copied") });
       items.push("-",
@@ -718,7 +792,7 @@ export default function Kalculator() {
     await flushSave();
     setSheet(null);
     const n = d.pages.filter((p) => !isBlank(p)).length;
-    toast(`Opened “${d.name}” · ${n} page${n === 1 ? "" : "s"}${parsed.notes.length ? " — " + parsed.notes.join(" ") : ""}`, { ms: 4500 });
+    toast(`Opened “${d.name}” · ${n} page${n === 1 ? "" : "s"}${parsed.notes.length ? ". " + parsed.notes.join(" ") : ""}`, { ms: 4500 });
   }
 
   // ── Physical keyboard, captured app-wide ──
@@ -742,8 +816,16 @@ export default function Kalculator() {
       const lk = k.toLowerCase();
       if (lk === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
       else if (lk === "y") { e.preventDefault(); redo(); }
+      else if (lk === "a") { e.preventDefault(); selectAll(); }
       return; // copy / cut / paste arrive as clipboard events below
     }
+    if (e.shiftKey && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(k)) {
+      e.preventDefault();
+      if (k === "ArrowLeft" || k === "ArrowRight") extendSel((tr, f) => Ed.selStep(tr, f, k === "ArrowLeft" ? -1 : 1));
+      else extendSel(k === "Home" ? Ed.moveHome : Ed.moveEnd);
+      return;
+    }
+    const sel = selRange();
     if (e.altKey) {
       if (pagesMode && (k === "ArrowLeft" || k === "ArrowRight")) { e.preventDefault(); goTo(idxRef.current + (k === "ArrowLeft" ? -1 : 1)); }
       return;
@@ -751,11 +833,11 @@ export default function Kalculator() {
     let handled = true;
     switch (k) {
       case "Enter": calculate(); break;
-      case "Backspace": edit(Ed.backspace); break;
-      case "Delete": edit(Ed.deleteForward); break;
-      case "Escape": if (pagesMode) newPageCmd(); else clearAll(); break;
-      case "ArrowLeft": nav(Ed.moveLeft); break;
-      case "ArrowRight": nav(Ed.moveRight); break;
+      case "Backspace": if (sel) edit((tr) => Ed.deleteRange(tr, sel)); else edit(Ed.backspace); break;
+      case "Delete": if (sel) edit((tr) => Ed.deleteRange(tr, sel)); else edit(Ed.deleteForward); break;
+      case "Escape": if (sel) collapseSel(1); else if (pagesMode) newPageCmd(); else clearAll(); break;
+      case "ArrowLeft": if (sel) collapseSel(-1); else nav(Ed.moveLeft); break;
+      case "ArrowRight": if (sel) collapseSel(1); else nav(Ed.moveRight); break;
       case "ArrowUp": if (!nav(Ed.moveUp) && !pagesMode) recallLast(); break;
       case "ArrowDown": nav(Ed.moveDown); break;
       case "Home": nav(Ed.moveHome); break;
@@ -767,8 +849,8 @@ export default function Kalculator() {
         break;
       default:
         if (k.length !== 1) { handled = false; break; }
-        if (/^[a-zA-Z]$/.test(k)) edit((tr, c) => Ed.typeChar(tr, c, k));
-        else if (k === "=") edit((tr, c) => Ed.insertChar(tr, c, "=")); // equations; Enter evaluates
+        if (/^[a-zA-Z]$/.test(k)) editSel((tr, c) => Ed.typeChar(tr, c, k));
+        else if (k === "=") editSel((tr, c) => Ed.insertChar(tr, c, "=")); // equations; Enter evaluates
         else if (/^[0-9.+\-*/^%!,()π]$/.test(k)) pressKey(k);
         else handled = false;
     }
@@ -783,11 +865,11 @@ export default function Kalculator() {
       const text = e.clipboardData?.getData("text");
       if (!text) return;
       e.preventDefault();
-      edit((tr, c) => Ed.insertText(tr, c, text));
+      editSel((tr, c) => Ed.insertText(tr, c, text));
     } else if (window.getSelection()?.isCollapsed !== false && !isBlank(curPage())) {
-      e.preventDefault(); // copy / cut with nothing selected: the expression, as re-pastable text
+      e.preventDefault(); // copy / cut: the selection or the whole expression, as re-pastable text
       e.clipboardData?.setData("text/plain", exprText());
-      if (e.type === "cut") clearAll();
+      if (e.type === "cut") cutNow();
     }
   };
   useEffect(() => {
@@ -802,19 +884,41 @@ export default function Kalculator() {
   }, []);
 
   // ── Pointer: tap / drag places the caret ──
-  const dragRef = useRef(false);
+  // A mouse drag selects; a finger drag moves the caret (long-press opens the menu).
+  const dragRef = useRef(false); // false | "select" | "move"
+  const anchorRef = useRef(null);
   function placeCaret(e) {
     const c = caretFromPoint(editorRef.current, e.clientX, e.clientY);
-    if (c && (c.seqId !== curRef.current.seqId || c.pos !== curRef.current.pos)) { curRef.current = c; bump(); }
+    if (!c) return;
+    if (dragRef.current === "select" && anchorRef.current) {
+      const a = anchorRef.current;
+      if (c.seqId === a.seqId && c.pos === a.pos) { selRef.current = null; curRef.current = c; bump(); }
+      else select(a, c);
+      return;
+    }
+    if (selRef.current || c.seqId !== curRef.current.seqId || c.pos !== curRef.current.pos) {
+      selRef.current = null;
+      curRef.current = c;
+      bump();
+    }
   }
   const editorPress = longPress("editor");
   const onEditorPointerDown = (e) => {
     if (e.button !== 0) return;
-    e.preventDefault(); // no text selection / focus jump
-    dragRef.current = true;
+    e.preventDefault(); // no browser text selection / focus jump
+    const c = caretFromPoint(editorRef.current, e.clientX, e.clientY);
+    if (e.shiftKey && c) { select(selRef.current?.anchor ?? curRef.current, c); return; } // shift+click extends
+    dragRef.current = e.pointerType === "mouse" ? "select" : "move";
+    anchorRef.current = c;
     e.currentTarget.setPointerCapture?.(e.pointerId);
     placeCaret(e);
     editorPress.onPointerDown(e);
+  };
+  // double-click: select everything in the slot under the pointer
+  const onEditorDoubleClick = (e) => {
+    const c = caretFromPoint(editorRef.current, e.clientX, e.clientY);
+    const n = c ? Ed.rangeNodes(curPage().tree, { seqId: c.seqId, start: 0, end: Infinity }).length : 0;
+    if (n) select({ seqId: c.seqId, pos: 0 }, { seqId: c.seqId, pos: n });
   };
   const onEditorPointerMove = (e) => { editorPress.onPointerMove(e); if (dragRef.current) placeCaret(e); };
   const onEditorPointerUp = () => { dragRef.current = false; cancelLongPress(); };
@@ -859,6 +963,27 @@ export default function Kalculator() {
   // ── Derived display state ──
   const tree = page.tree;
   const flatExpr = useMemo(() => toExpr(tree), [tree, rev]);
+  const selection = selRange();
+  // The document's plots: its calculated Graph pages, in order.
+  const plots = doc.pages
+    .filter((p) => p.mode === "graph" && p.out?.type === "graph" && isFresh(p))
+    .map((p, i) => ({ id: p.id, tree: p.tree, expr: p.out.expr, hidden: !!p.out.hidden, color: PLOT_COLORS[i % PLOT_COLORS.length] }));
+  const visiblePlots = plots.filter((p) => !p.hidden).length;
+  function togglePlot(id) {
+    const p = docRef.current.pages.find((x) => x.id === id);
+    if (p?.out) { p.out = { ...p.out, hidden: !p.out.hidden }; touch(); bump(); }
+  }
+  function clearPlots() {
+    const shown = docRef.current.pages.filter((p) => p.mode === "graph" && p.out && !p.out.hidden);
+    for (const p of shown) p.out = { ...p.out, hidden: true };
+    touch();
+    bump();
+    toast(`Cleared ${shown.length} plot${shown.length === 1 ? "" : "s"}`, { action: "Undo", run: () => {
+      for (const p of shown) if (p.out) p.out = { ...p.out, hidden: false };
+      touch();
+      bump();
+    } });
+  }
   const scope = useMemo(() => ({ ans: lastAns, ...vars }), [lastAns, vars]);
   const isEmpty = tree.children.length === 0;
   const fresh = isFresh(page);
@@ -877,7 +1002,7 @@ export default function Kalculator() {
     if (mode === "graph") return { text: "Press = to plot f(x)", cls: "hint" };
     if (mode === "calculus") return { text: `= → ∫ from ${caA} to ${caB}  ·  d/dx → slope at x = ${caA}`, cls: "hint" };
     return null;
-  }, [flatExpr, mode, settings.preview, scope, evalError, caA, caB]);
+  }, [flatExpr, mode, settings.preview, scope, evalError, caA, caB, settings.angle, settings.digits, settings.notation, settings.grouping]);
 
   const suggestions = useMemo(() => {
     if (!settings.suggest || !flatExpr || !(mode === "calc" || mode === "solve" || mode === "graph")) return [];
@@ -908,7 +1033,7 @@ export default function Kalculator() {
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flatExpr, rev, mode, settings.suggest, settings.preview, scope]);
+  }, [flatExpr, rev, mode, settings.suggest, settings.preview, scope, settings.angle, settings.digits, settings.notation, settings.grouping]);
 
   // ── Keypad model ──
   // CALC mode shows the imaginary unit `i`; SOLVE/GRAPH show the variable `x`.
@@ -984,12 +1109,35 @@ export default function Kalculator() {
   const entries = pagesMode ? [] : doc.pages.map((p, i) => [p, i]).filter(([p, i]) => i !== idxRef.current && !isBlank(p));
   const latestIdx = !pagesMode && isEmpty && justEvalRef.current ? idxRef.current - 1 : -1;
 
+  // Shrink a long expression to fit the display width (down to 55 %) instead of
+  // scrolling sideways. "min-content" measures the widest piece that cannot
+  // wrap; dividing by the current scale gives its natural width.
+  const [fit, setFit] = useState(1);
+  const fitRef = useRef(1);
+  useLayoutEffect(() => {
+    const ed = editorRef.current;
+    const root = ed?.querySelector(".m-root");
+    if (!root) return;
+    root.style.width = "min-content";
+    const natural = root.getBoundingClientRect().width / fitRef.current;
+    root.style.width = "";
+    const next = natural > 0 ? Math.max(0.55, Math.min(1, (ed.clientWidth - 2) / natural)) : 1;
+    if (Math.abs(next - fitRef.current) > 0.02) { fitRef.current = next; setFit(next); }
+  });
+  const angleChip = (
+    <button className="k-anglechip" onClick={() => setSetting("angle", settings.angle === "deg" ? "rad" : "deg")}
+      title={settings.angle === "deg" ? "Angles in degrees: tap for radians" : "Angles in radians: tap for degrees"}>
+      {settings.angle === "deg" ? "DEG" : "RAD"}
+    </button>
+  );
+
   const editorBlock = (
     <div className="k-current" onContextMenu={(e) => { cancelLongPress(); openMenu(e, "editor"); }}>
       <div className="k-editor" ref={editorRef} role="textbox" aria-label={isEmpty ? "Expression (empty)" : `Expression: ${toText(tree)}`}
+        style={{ "--fit": fit }}
         onPointerDown={onEditorPointerDown} onPointerMove={onEditorPointerMove}
-        onPointerUp={onEditorPointerUp} onPointerCancel={onEditorPointerUp}>
-        <MathView root={tree} cur={cur} blink={rev} placeholder={isEmpty ? placeholder : null} />
+        onPointerUp={onEditorPointerUp} onPointerCancel={onEditorPointerUp} onDoubleClick={onEditorDoubleClick}>
+        <MathView root={tree} cur={cur} sel={selection} blink={rev} placeholder={isEmpty ? placeholder : null} />
       </div>
       {pagesMode && fresh && !evalError
         ? <Result out={page.out} copied={copiedKey === "cur"} onCopy={(text) => copyText(text, "cur")} onToggleFraction={() => toggleDecimal(page)} />
@@ -1002,7 +1150,7 @@ export default function Kalculator() {
       onMouseDown={(e) => { if (e.target.closest?.("button")) e.preventDefault(); /* keys never steal focus */ }}
       onDragOver={(e) => { if (e.dataTransfer?.types?.includes("Files")) e.preventDefault(); }}
       onDrop={(e) => { const f = e.dataTransfer?.files?.[0]; if (f) { e.preventDefault(); importFile(f); } }}>
-      {showGraph && <GraphView expressions={graphExprs} onClose={() => setShowGraph(false)} />}
+      {showGraph && <GraphView plots={plots} angle={settings.angle} onToggle={togglePlot} onClose={() => setShowGraph(false)} />}
       <input ref={fileInputRef} type="file" accept=".kalc,.json,application/json" hidden
         onChange={(e) => { importFile(e.target.files?.[0]); e.target.value = ""; }} />
 
@@ -1040,6 +1188,12 @@ export default function Kalculator() {
             <SettingToggle on={settings.pages} onChange={(v) => setSetting("pages", v)} label="Pages" hint="One calculation per page · off: running history" />
             <SettingToggle on={settings.preview} onChange={(v) => setSetting("preview", v)} label="Live result" hint="Show the answer as you type" />
             <SettingToggle on={settings.suggest} onChange={(v) => setSetting("suggest", v)} label="Suggestions" hint="Hint chips under the expression" />
+            <div className="k-pop-title">Math</div>
+            <Segmented label="Angles" value={settings.angle} onChange={(v) => setSetting("angle", v)} options={[["rad", "Radians"], ["deg", "Degrees"]]} />
+            <div className="k-pop-title">Numbers</div>
+            <Segmented label="Digits" value={settings.digits} onChange={(v) => setSetting("digits", v)} options={[[6, "6"], [10, "10"], [12, "12"], [15, "15"]]} />
+            <Segmented label="Format" value={settings.notation} onChange={(v) => setSetting("notation", v)} options={[["auto", "Auto"], ["sci", "Sci"], ["eng", "Eng"]]} />
+            <SettingToggle on={settings.grouping} onChange={(v) => setSetting("grouping", v)} label="Thousands separators" hint="1,234,567 instead of 1234567" />
           </div>
         </>
       )}
@@ -1050,6 +1204,7 @@ export default function Kalculator() {
           <section className={`k-display${pagesMode ? " is-pages" : ""}`}>
             {!pagesMode && (
               <div className="k-disp-tools">
+                {angleChip}
                 <button className="k-mini" title={`Undo (${MOD}Z)`} disabled={!undoState.past.length} onClick={undo}><Icon name="undo" size={14} /></button>
                 <button className="k-mini" title={`Redo (${MOD}Y)`} disabled={!undoState.future.length} onClick={redo}><Icon name="redo" size={14} /></button>
                 {entries.length > 0 && <button className="k-mini" title="Clear history" onClick={clearClassicHistory}><Icon name="trash" size={14} /></button>}
@@ -1096,7 +1251,7 @@ export default function Kalculator() {
             {suggestions.length > 0 && (
               <div className="k-suggest" aria-label="Suggestions">
                 {suggestions.map((s) => (
-                  <button key={s.key} className={`k-chip${s.hot ? " hot" : ""}${s.info ? " info" : ""}`} onClick={s.run}>{s.label}</button>
+                  <button key={s.key} className={`k-chip${s.hot ? " hot" : ""}${s.info ? " info" : ""}`} onClick={s.run}>{prettyNum(s.label)}</button>
                 ))}
               </div>
             )}
@@ -1113,8 +1268,8 @@ export default function Kalculator() {
             )}
             {mode === "graph" && (
               <div className="k-modebar">
-                <button className="k-btn grow" onClick={() => { if (graphExprs.length) setShowGraph(true); }} disabled={!graphExprs.length}>View graph{graphExprs.length ? ` (${graphExprs.length})` : ""}</button>
-                <button className="k-btn ghost grow" onClick={() => setGraphExprs([])} disabled={!graphExprs.length}>Clear plots</button>
+                <button className="k-btn grow" onClick={() => setShowGraph(true)} disabled={!plots.length}>View graph{visiblePlots ? ` (${visiblePlots})` : ""}</button>
+                <button className="k-btn ghost grow" onClick={clearPlots} disabled={!visiblePlots}>Clear plots</button>
               </div>
             )}
 
@@ -1122,9 +1277,12 @@ export default function Kalculator() {
               <nav className="k-pagebar" aria-label="Pages">
                 <button className="k-pagebtn" onClick={() => goTo(idxRef.current - 1)} disabled={idxRef.current === 0} title="Previous page (PgUp)"><Icon name="left" size={18} /></button>
                 <button className="k-pagebtn sm" title={`Undo (${MOD}Z)`} disabled={!undoState.past.length} onClick={undo}><Icon name="undo" size={15} /></button>
-                <button className="k-pagecount" onClick={() => setSheet("pages")} title="All pages">
-                  <Icon name="pages" size={14} />{pageNo} / {pageCount}
-                </button>
+                <div className="k-pagemid">
+                  {angleChip}
+                  <button className="k-pagecount" onClick={() => setSheet("pages")} title="All pages">
+                    <Icon name="pages" size={14} />{pageNo} / {pageCount}
+                  </button>
+                </div>
                 <button className="k-pagebtn sm" title={`Redo (${MOD}Y)`} disabled={!undoState.future.length} onClick={redo}><Icon name="redo" size={15} /></button>
                 {onLastPage
                   ? <button className="k-pagebtn" onClick={newPageCmd} disabled={isEmpty} title="New page (CE)"><Icon name="plus" size={18} /></button>
@@ -1153,7 +1311,7 @@ export default function Kalculator() {
                     <button className={`kk kk-var kk-sto${storeArmed ? " armed" : ""}`} onClick={armStore} title="Store the current value into a variable" tabIndex={fnOpen ? 0 : -1}>{storeArmed ? "STO →" : "STO"}</button>
                     {["A", "B", "C", "D", "M"].map((v) => (
                       <button key={v} className={`kk kk-var${storeArmed ? " armed" : vars[v] !== undefined ? " set" : ""}`} onClick={() => onVar(v)} tabIndex={fnOpen ? 0 : -1}
-                        title={vars[v] !== undefined ? `${v} (stored — tap to use)` : `variable ${v}`}>{v}</button>
+                        title={vars[v] !== undefined ? `${v} (stored: tap to use)` : `variable ${v}`}>{v}</button>
                     ))}
                   </div>
                 )}

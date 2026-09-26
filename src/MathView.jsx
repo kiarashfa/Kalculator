@@ -66,8 +66,8 @@ function charText(v) {
 }
 
 // ─── Nodes ──────────────────────────────────────────────────────────────────
-function Node({ node, prev, ctx, dp, di }) {
-  const data = { "data-p": dp, "data-i": di };
+function Node({ node, prev, ctx, dp, di, sel }) {
+  const data = { "data-p": dp, "data-i": di, ...(sel ? { "data-sel": "" } : {}) };
   switch (node.type) {
     case "char":
       return <span className={charClass(node.value, prev)} {...data}>{charText(node.value)}</span>;
@@ -172,7 +172,8 @@ function Seq({ seq, ctx, cls = "", root = false }) {
   }
 
   const caret = (i) => (caretPos === i ? <Caret key={`c${ctx.blink}`} blink={ctx.blink} /> : null);
-  const node = (i) => <Node key={kids[i].id} node={kids[i]} prev={kids[i - 1]} ctx={ctx} dp={seq.id} di={i} />;
+  const sel = ctx.sel && ctx.sel.seqId === seq.id ? ctx.sel : null;
+  const node = (i) => <Node key={kids[i].id} node={kids[i]} prev={kids[i - 1]} ctx={ctx} dp={seq.id} di={i} sel={!!sel && i >= sel.start && i < sel.end} />;
 
   // units: [startIdx, endIdx] — a node plus any exponents trailing it
   const units = [];
@@ -222,10 +223,11 @@ function Seq({ seq, ctx, cls = "", root = false }) {
 
 // ─── Public component ───────────────────────────────────────────────────────
 // root: the tree · cur: caret {seqId,pos} or null (read-only) · blink: changes
-// on every caret move to restart the blink · placeholder: shown when empty.
-export default function MathView({ root, cur = null, blink = 0, placeholder = null, className = "" }) {
+// on every caret move to restart the blink · placeholder: shown when empty ·
+// sel: a selection { seqId, start, end } to highlight (the caret hides meanwhile).
+export default function MathView({ root, cur = null, sel = null, blink = 0, placeholder = null, className = "" }) {
   if (!root) return null;
-  const ctx = { cur, blink, placeholder };
+  const ctx = { cur: sel ? null : cur, sel, blink, placeholder };
   return (
     <div className={`m-root ${className}`}>
       <Seq seq={root} ctx={ctx} root />

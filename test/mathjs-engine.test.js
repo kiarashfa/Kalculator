@@ -211,7 +211,7 @@ test("solve: non-polynomial e^x=5 falls back, finds ln 5, discloses the range", 
 test("solve: cos(x)=0 is reported as infinitely many (not scattered values)", { skip: SKIP }, () => {
   const r = E.solve("cos(x)=0");
   assert.equal(r.kind, "fallback");
-  assert.match(r.display, /infinitely many — periodic/);
+  assert.match(r.display, /infinitely many: periodic/);
   assert.ok(r.solutions.length > 20); // many roots across [-100, 100]
 });
 

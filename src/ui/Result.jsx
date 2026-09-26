@@ -1,15 +1,21 @@
+import { MathEngine } from "../compute.js";
+
 // A page's result, as shown under its expression (big on the open page,
 // smaller in the Classic history list and the pages overview).
 
 // Results read with a true minus sign (display only; copying keeps ASCII).
-export const prettyNum = (s) => String(s).replace(/(^|[\s(,=e])-/g, "$1−");
+export const prettyNum = (s) => String(s).replace(/(^|[\s([,=e])-/g, "$1−");
 // A result as it should land on the clipboard: no thousands separators, so it
 // pastes back as a number (1,025 → 1025).
 export const plainNum = (s) => String(s).replace(/(\d),(?=\d{3}(?:\D|$))/g, "$1");
+// A real result is re-formatted from its value, so changing digits / notation
+// / separators in settings updates every page; anything else shows as stored.
+export const shownResult = (out) => (out.type === "calc" && typeof out.value === "number" ? MathEngine.fmt(out.value) : out.result);
 
 export default function Result({ out, copied, onCopy, onToggleFraction, stale = false }) {
   if (!out) return null;
-  const primary = out.fraction ? (out.showDecimal ? out.result : out.fraction) : out.result;
+  const shown = shownResult(out);
+  const primary = out.fraction ? (out.showDecimal ? shown : out.fraction) : shown;
   const canCopy = out.type === "calc" || out.type === "solve";
   return (
     <div className={`k-result${stale ? " stale" : ""}`}>
@@ -30,9 +36,10 @@ export default function Result({ out, copied, onCopy, onToggleFraction, stale = 
       )}
       {out.fraction && (
         <button className="k-fracchip" onClick={onToggleFraction} title="Toggle fraction / decimal">
-          {out.showDecimal ? out.fraction : out.result}
+          {prettyNum(out.showDecimal ? out.fraction : shown)}
         </button>
       )}
+      {out.angle && <span className="k-angletag" title={out.angle === "deg" ? "Calculated in degrees" : "Calculated in radians"}>{out.angle === "deg" ? "DEG" : "RAD"}</span>}
       {copied && out.solutions && <span className="k-note">copied ✓</span>}
     </div>
   );
