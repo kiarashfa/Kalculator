@@ -2,13 +2,13 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 // The deployed origin + base path. This is the ONE place either is written down:
-// index.html gets it via %SITE_URL% below, and robots.txt / sitemap.xml are
+// index.html gets it via %SITE_URL% below, and robots.txt / sitemap-index.xml are
 // generated from it, so a domain or repo rename is a single-line edit here.
 const BASE = '/Kalculator/'
 const ORIGIN = 'https://kiarashfa.github.io'
 const SITE_URL = ORIGIN + BASE
 
-// Emits robots.txt and sitemap.xml into the build with real, base-aware URLs,
+// Emits robots.txt and sitemap-index.xml into the build with real, base-aware URLs,
 // rather than shipping hand-written files that go stale.
 function seoFiles() {
   return {
@@ -20,11 +20,11 @@ function seoFiles() {
       this.emitFile({
         type: 'asset',
         fileName: 'robots.txt',
-        source: `User-agent: *\nAllow: /\n\nSitemap: ${SITE_URL}sitemap.xml\n`,
+        source: `User-agent: *\nAllow: /\n\nSitemap: ${SITE_URL}sitemap-index.xml\n`,
       })
       this.emitFile({
         type: 'asset',
-        fileName: 'sitemap.xml',
+        fileName: 'sitemap-index.xml',
         source:
           `<?xml version="1.0" encoding="UTF-8"?>\n` +
           `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
