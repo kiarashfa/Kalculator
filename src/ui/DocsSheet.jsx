@@ -64,15 +64,15 @@ export default function DocsSheet({ current, pageCount, docs, persistent, fileNa
           {fileName && <> · <span title="Ctrl+S saves here">{fileName}</span></>}
         </div>
         <div className="k-doc-actions">
-          <button className="k-btn" onClick={() => onSaveFile(current.id, false)}><Icon name="save" size={15} />{fileName ? "Save" : "Save to file"}</button>
           {fileName && <button className="k-btn ghost" onClick={() => onSaveFile(current.id, true)}>Save as…</button>}
           <button className="k-btn ghost" onClick={() => onDuplicate(current.id)}><Icon name="duplicate" size={15} />Duplicate</button>
         </div>
       </section>
 
       <div className="k-doc-bar">
-        <button className="k-btn ghost grow" onClick={onNew}><Icon name="file-plus" size={15} />New document</button>
-        <button className="k-btn ghost grow" onClick={onOpenFile}><Icon name="folder" size={15} />Open file…</button>
+        <button className="k-btn ghost grow" onClick={onNew}><Icon name="file-plus" size={15} />New</button>
+        <button className="k-btn ghost grow" onClick={onOpenFile} title="Open a .kalc document or a save file"><Icon name="folder" size={15} />Open</button>
+        <button className="k-btn grow" onClick={() => onSaveFile(current.id, false)} title={fileName ? `Save to ${fileName}` : "Save this document to a file"}><Icon name="save" size={15} />Save</button>
       </div>
 
       {others.length > 0 && <h3 className="k-eyebrow k-doc-listhead">In this browser</h3>}

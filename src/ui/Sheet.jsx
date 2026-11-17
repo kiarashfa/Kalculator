@@ -49,7 +49,7 @@ export function SheetTabs({ tabs, value, onChange }) {
   return (
     <div className="k-tabs" role="tablist">
       {tabs.map((t) => (
-        <button key={t.id} role="tab" aria-selected={value === t.id} className={`k-tab${value === t.id ? " on" : ""}`} onClick={() => onChange(t.id)}>
+        <button key={t.id} type="button" role="tab" aria-selected={value === t.id} className={`k-tab${value === t.id ? " on" : ""}`} onClick={() => onChange(t.id)}>
           {t.icon && <Icon name={t.icon} size={14} />}{t.label}
         </button>
       ))}

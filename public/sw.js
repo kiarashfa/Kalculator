@@ -3,13 +3,13 @@
 // first online visit, the app shell + hashed assets are cached, so it launches
 // and works fully offline. Cross-origin requests (e.g. Google Fonts) are not
 // cached; the webfonts are self-hosted, so they are cached with the app assets.
-const CACHE = "kalculator-v2";
+const CACHE = "kalculator-v3";
 
 // UI icons are small self-hosted SVGs; precache them so panels opened for the
 // first time while offline (help, about, documents) still show their icons.
 // Keep in sync with public/icons/ui/.
 const ICONS = [
-  "backspace", "angle", "bulb", "check", "close", "code", "coffee", "copy", "cut", "dots", "duplicate", "edit", "eraser", "file", "file-plus", "folder", "github", "globe", "graph", "hand", "heart", "info", "keyboard", "left", "mail", "pages", "paste", "paypal", "plus", "redo", "right", "save", "select", "sliders", "trash", "undo", "up"
+  "backspace", "angle", "bulb", "camera", "check", "close", "cloud", "code", "coffee", "copy", "cut", "dots", "duplicate", "edit", "eraser", "file", "file-plus", "folder", "github", "globe", "graph", "hand", "heart", "info", "key", "keyboard", "left", "logout", "mail", "pages", "paste", "paypal", "plus", "redo", "refresh", "right", "save", "select", "shield", "sliders", "trash", "undo", "up", "user"
 ].map((n) => `icons/ui/${n}.svg`);
 
 self.addEventListener("install", (event) => {
@@ -30,6 +30,7 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET" || !req.url.startsWith(self.location.origin)) return; // let the network handle it
+  if (new URL(req.url).searchParams.has("code")) return; // Dropbox sign in answer: one time, never cached
   event.respondWith(
     (async () => {
       const cache = await caches.open(CACHE);

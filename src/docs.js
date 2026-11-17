@@ -20,6 +20,7 @@ import { parseText } from "./mathParse.js";
 export const MAX_PAGES = 200;
 export const MATH_MODES = ["calc", "solve", "graph", "calculus"];
 export const FILE_EXT = ".kalc";
+export const SAVE_EXT = ".kalcsave"; // the save file: every document plus the profile (workspace.js)
 const FORMAT = "kalculator-document";
 const VERSION = 1;
 const MAX_NAME = 60;
@@ -159,8 +160,9 @@ function packTree(n) {
   return rest;
 }
 
-export function toFile(doc) {
-  return JSON.stringify({
+// A document as plain data: the shape inside a .kalc file and inside a save file.
+export function packDoc(doc) {
+  return {
     format: FORMAT,
     version: VERSION,
     app: "Kalculator",
@@ -175,7 +177,21 @@ export function toFile(doc) {
       tree: packTree(p.tree),
       out: p.out || undefined,
     })),
-  }, null, 1);
+  };
+}
+
+export function toFile(doc) {
+  return JSON.stringify(packDoc(doc), null, 1);
+}
+
+// Packed document data (untrusted) → { doc, notes[] }, or null when it is not a document.
+export function unpackDoc(data) {
+  if (!data || data.format !== FORMAT || !Array.isArray(data.pages)) return null;
+  const notes = [];
+  if (typeof data.version === "number" && data.version > VERSION) notes.push("It was saved by a newer version of Kalculator; some details may be missing.");
+  if (data.pages.length > MAX_PAGES) notes.push(`Only the first ${MAX_PAGES} pages were opened.`);
+  const doc = sanitizeDoc({ ...data, current: data.pages.length - 1 });
+  return { doc, notes };
 }
 
 // Text of a .kalc file → { doc, notes[] }. Throws an Error with a message fit
@@ -183,12 +199,9 @@ export function toFile(doc) {
 export function parseFile(text) {
   let data;
   try { data = JSON.parse(text); } catch { throw new Error("This file isn't a Kalculator document (it isn't valid JSON)."); }
-  if (!data || data.format !== FORMAT || !Array.isArray(data.pages)) throw new Error("This file isn't a Kalculator document.");
-  const notes = [];
-  if (typeof data.version === "number" && data.version > VERSION) notes.push("It was saved by a newer version of Kalculator; some details may be missing.");
-  if (data.pages.length > MAX_PAGES) notes.push(`Only the first ${MAX_PAGES} pages were opened.`);
-  const doc = sanitizeDoc({ ...data, current: data.pages.length - 1 });
-  return { doc, notes };
+  const unpacked = unpackDoc(data);
+  if (!unpacked) throw new Error("This file isn't a Kalculator document.");
+  return unpacked;
 }
 
 // ─── Migration from the single-list history (≤ Sep 2026) ───────────────────

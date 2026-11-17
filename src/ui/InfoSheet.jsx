@@ -1,5 +1,6 @@
 import Sheet, { SheetTabs } from "./Sheet.jsx";
 import Icon from "./Icon.jsx";
+import { PRIVACY } from "../privacy.js";
 
 // One sheet for help and about: Guide (how things work), Keys (keyboard
 // shortcuts) and About (the app, its developer, support links).
@@ -11,6 +12,7 @@ const GUIDE = [
   { icon: "select", title: "Select part of an expression", text: "Drag with the mouse, use Shift and the arrow keys, or double click a slot. Then type to replace it, or press ( ÷ √ x² or a function to wrap it." },
   { icon: "copy", title: "Copy & paste keep the math", text: "Right click (or press and hold) the display for copy, paste and LaTeX. 2^3 pastes back as 2³, and (1+2)/3 as a fraction." },
   { icon: "file", title: "Documents", text: "Pages are saved in this browser as you go. Save a document to a .kalc file to keep a copy or open it on another device." },
+  { icon: "user", title: "Profile and cloud save", text: "Tap the picture at the top to add your name and a photo or initials. There is no password: your save file is your key, and you can also connect Google Drive or Dropbox to keep your documents on all your devices." },
   { icon: "angle", title: "Degrees or radians", text: "Tap RAD / DEG under the display to switch. Results that use trigonometry show which one they were calculated in." },
   { icon: "sliders", title: "Number format", text: "In settings, choose the significant digits, scientific or engineering notation, and thousands separators. Every page follows." },
   { icon: "graph", title: "Graphs stay with the document", text: "Each Graph page you calculate is a plot. In the graph, tap a function in the legend to hide or show it; + and − zoom." },
@@ -50,7 +52,7 @@ const KEYS = [
 // Edit this block to change the About text.
 const ABOUT = {
   intro: "Kalculator is a free scientific calculator that writes math the way it looks on paper while you type: fractions stacked, powers raised, roots drawn. It solves equations, draws graphs, does derivatives and integrals, converts units, currencies and number bases, and keeps your work in documents you can save and reopen.",
-  privacy: "It runs entirely in your browser: no account and no ads, and your calculations and documents stay on your device.",
+  privacy: "It runs entirely in your browser: no account and no ads, and your calculations and documents stay on your device unless you choose to keep a copy in your own Google Drive or Dropbox.",
   dev: "Designed and built by Kiarash Farajzadehahary (Kia, the K in Kalculator). It's an independent project, made with care for everyone who counts.",
   links: [
     { icon: "globe", label: "Website", href: "https://kiarashfa.github.io/website/" },
@@ -96,7 +98,26 @@ function Keys() {
   );
 }
 
-function About() {
+// Inline links inside a privacy paragraph: a string, or an array of strings and { href, text }.
+export function Inline({ parts }) {
+  if (typeof parts === "string") return parts;
+  return parts.map((p, i) => typeof p === "string" ? p : <a key={i} href={p.href} target="_blank" rel="noopener noreferrer">{p.text}</a>);
+}
+
+function Privacy() {
+  return (
+    <div className="k-privacy">
+      {PRIVACY.map((sec) => (
+        <section key={sec.title}>
+          <h3 className="k-eyebrow">{sec.title}</h3>
+          {sec.text.map((para, i) => <p key={i} className="k-about-text"><Inline parts={para} /></p>)}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function About({ onTab }) {
   const ext = { target: "_blank", rel: "noopener noreferrer" };
   return (
     <div className="k-about">
@@ -108,7 +129,7 @@ function About() {
         </div>
       </div>
       <p className="k-about-text">{ABOUT.intro}</p>
-      <p className="k-about-text dim">{ABOUT.privacy}</p>
+      <p className="k-about-text dim">{ABOUT.privacy} <button className="k-link" onClick={() => onTab("privacy")}>Privacy policy</button></p>
 
       <section className="k-about-card">
         <h3 className="k-eyebrow">The developer</h3>
@@ -143,15 +164,17 @@ const TABS = [
   { id: "guide", label: "Guide", icon: "bulb" },
   { id: "keys", label: "Keys", icon: "keyboard" },
   { id: "about", label: "About", icon: "info" },
+  { id: "privacy", label: "Privacy", icon: "shield" },
 ];
 
 export default function InfoSheet({ tab, onTab, onClose }) {
   return (
-    <Sheet title={tab === "about" ? "About" : "Help"} onClose={onClose} className="k-info"
+    <Sheet title={tab === "about" ? "About" : tab === "privacy" ? "Privacy" : "Help"} onClose={onClose} className="k-info"
       tabs={<SheetTabs tabs={TABS} value={tab} onChange={onTab} />}>
       {tab === "guide" && <Guide />}
       {tab === "keys" && <Keys />}
-      {tab === "about" && <About />}
+      {tab === "about" && <About onTab={onTab} />}
+      {tab === "privacy" && <Privacy />}
     </Sheet>
   );
 }

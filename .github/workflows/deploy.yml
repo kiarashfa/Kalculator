@@ -28,6 +28,10 @@ jobs:
 
       - run: npm install
       - run: npm run build
+        env:
+          # Public OAuth client ids for cloud save (repository variables).
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          DROPBOX_APP_KEY: ${{ vars.DROPBOX_APP_KEY }}
 
       - uses: actions/configure-pages@v4
       - uses: actions/upload-pages-artifact@v3

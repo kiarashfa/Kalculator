@@ -15,6 +15,11 @@ import Result, { prettyNum, plainNum, shownResult } from "./ui/Result.jsx";
 import InfoSheet from "./ui/InfoSheet.jsx";
 import DocsSheet from "./ui/DocsSheet.jsx";
 import PagesSheet from "./ui/PagesSheet.jsx";
+import ProfileSheet from "./ui/ProfileSheet.jsx";
+import ProfileButton from "./ui/ProfileButton.jsx";
+import * as Account from "./account.js";
+import { startAutoSave, isDropboxReturn, finishDropbox } from "./cloud.js";
+import { isSaveData } from "./workspace.js";
 import ContextMenu from "./ui/ContextMenu.jsx";
 import { useToasts, Toasts } from "./ui/Toasts.jsx";
 
@@ -166,8 +171,9 @@ export default function Kalculator() {
   const [copiedKey, setCopiedKey] = useState(null);
   const [evalError, setEvalError] = useState(null); // "=" failed: the expression stays, the reason shows
   const [showSettings, setShowSettings] = useState(false);
-  const [info, setInfo] = useState(null); // null | "guide" | "keys" | "about"
-  const [sheet, setSheet] = useState(null); // null | "docs" | "pages"
+  // null | "guide" | "keys" | "about" | "privacy" (the address #privacy opens the policy)
+  const [info, setInfo] = useState(() => (typeof location !== "undefined" && location.hash === "#privacy" ? "privacy" : null));
+  const [sheet, setSheet] = useState(null); // null | "docs" | "pages" | "profile"
   const [docList, setDocList] = useState([]);
   const [menu, setMenu] = useState(null); // context menu { x, y, items }
   const { toasts, toast, dismiss } = useToasts();
@@ -277,15 +283,60 @@ export default function Kalculator() {
     })();
   }, []);
 
-  // Another tab saved or deleted the document open here.
-  useEffect(() => Store.onOtherTabChange(async (msg) => {
-    Store.listDocs().then(setDocList).catch(() => {});
-    if (msg.id !== docRef.current.id) return;
-    if (msg.type === "deleted") { storedIds.current.delete(msg.id); return; }
+  // The stored documents changed behind the editor's back: another tab saved or deleted one, a
+  // save file or the cloud brought documents in, or someone signed out.
+  async function reloadOpenDoc() {
     if (saveTimer.current) return; // unsaved edits here: they win
-    const d = await Store.loadDoc(msg.id);
-    if (d && d.updatedAt > docRef.current.updatedAt) openDoc(d, { keepPage: true });
+    const d = docRef.current;
+    if (isBlankDoc(d) && !storedIds.current.has(d.id)) { // a fresh browser that just signed in: open what came in
+      const id = await Store.currentDocId().catch(() => null);
+      const next = id ? await Store.loadDoc(id).catch(() => null) : null;
+      if (next && isBlankDoc(docRef.current)) { storedIds.current.add(next.id); openDoc(next); }
+      return;
+    }
+    const next = await Store.loadDoc(d.id).catch(() => null);
+    if (next && next.updatedAt > docRef.current.updatedAt) openDoc(next, { keepPage: true });
+  }
+  function resetAfterSignOut() {
+    clearTimeout(saveTimer.current);
+    saveTimer.current = null;
+    storedIds.current = new Set();
+    fileHandles.current.clear();
+    setDocList([]);
+    openDoc(newDoc());
+  }
+  useEffect(() => Store.onStoreChange(async (msg) => {
+    Store.listDocs().then(setDocList).catch(() => {});
+    if (msg.type === "cleared") { resetAfterSignOut(); return; }
+    if (msg.type === "merged") { reloadOpenDoc(); return; }
+    if (msg.type === "profile" || msg.id !== docRef.current.id) return;
+    if (msg.type === "deleted") { storedIds.current.delete(msg.id); return; }
+    reloadOpenDoc();
   }), []);
+
+  // Cloud save: coming back from Dropbox's sign in page finishes connecting; otherwise a
+  // connected cloud brings in what another device saved and keeps saving after each change.
+  useEffect(() => {
+    if (isDropboxReturn()) {
+      setSheet("profile");
+      finishDropbox()
+        .then((r) => toast(r.imported ? `Brought in ${r.imported} from Dropbox` : "Connected to Dropbox", { ms: 3500 }))
+        .catch((e) => toast(e?.message || "Dropbox did not finish connecting.", { tone: "error", ms: 6000 }));
+    }
+    startAutoSave();
+  }, []);
+
+  // The privacy policy has its own address (#privacy): follow it, and keep it in step with the sheet.
+  useEffect(() => {
+    const onHash = () => { if (location.hash === "#privacy") { setShowSettings(false); setSheet(null); setInfo("privacy"); } };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  useEffect(() => {
+    const has = location.hash === "#privacy";
+    if (info === "privacy" && !has) history.replaceState(null, "", "#privacy");
+    else if (info !== "privacy" && has) history.replaceState(null, "", location.pathname + location.search);
+  }, [info]);
 
   // ── Scrolling ──
   useEffect(() => { const s = scrollRef.current; if (s && !pagesMode) s.scrollTop = s.scrollHeight; }, [doc.pages.length, mode, pagesMode, doc.id]);
@@ -710,6 +761,7 @@ export default function Kalculator() {
     refreshDocList();
     toast(`Deleted “${snapshot.name}”`, { action: "Undo", run: async () => {
       const d = sanitizeDoc(snapshot);
+      d.updatedAt = Date.now(); // newer than the deletion, so a cloud merge keeps it
       await Store.saveDoc(d, { makeCurrent: isCurrent }).catch(() => {});
       storedIds.current.add(d.id);
       if (isCurrent) openDoc(d);
@@ -754,7 +806,7 @@ export default function Kalculator() {
     if (window.showOpenFilePicker) {
       try {
         const [handle] = await window.showOpenFilePicker({
-          types: [{ description: "Kalculator document", accept: { "application/json": [".kalc", ".json"] } }],
+          types: [{ description: "Kalculator file", accept: { "application/json": [".kalc", ".kalcsave", ".json"] } }],
         });
         await importFile(await handle.getFile(), handle);
         return;
@@ -764,13 +816,27 @@ export default function Kalculator() {
     }
     fileInputRef.current?.click();
   }
+  // A save file is the sign in key: its profile and documents join what this browser has.
+  async function openSaveFile(text) {
+    await flushSave();
+    const r = await Account.openSaveText(text).catch(() => ({ ok: false, error: "That save file couldn't be opened in this browser." }));
+    if (!r.ok) { toast(r.error, { tone: "error", ms: 5000 }); return; }
+    const head = r.plan.profile ? `Signed in as ${r.plan.profile.name || "you"}` : "Save file opened";
+    const body = r.summary ? `Brought in ${r.summary}` : "Nothing new in that file";
+    toast(`${head}. ${body}${r.notes.length ? ". " + r.notes.join(" ") : ""}`, { ms: 5000 });
+  }
   // A .kalc file → a document in this browser (never overwriting one: a
   // different version of a stored document is kept alongside it).
   async function importFile(file, handle = null) {
     if (!file) return;
+    if (file.size > 60 * 1024 * 1024) { toast("That file is too large to be a Kalculator file", { tone: "error" }); return; }
+    const text = await file.text().catch(() => "");
+    let data = null;
+    try { data = JSON.parse(text); } catch { /* parseFile explains */ }
+    if (isSaveData(data)) { await openSaveFile(text); return; }
     if (file.size > 5 * 1024 * 1024) { toast("That file is too large to be a Kalculator document", { tone: "error" }); return; }
     let parsed;
-    try { parsed = parseFile(await file.text()); } catch (e) { toast(e.message, { tone: "error", ms: 5000 }); return; }
+    try { parsed = parseFile(text); } catch (e) { toast(e.message, { tone: "error", ms: 5000 }); return; }
     const d = recomputeDoc(parsed.doc); // results are recomputed, never taken from the file
     await flushSave();
     const sig = (x) => JSON.stringify(x.pages.map((p) => [p.mode, toText(p.tree)]));
@@ -1151,7 +1217,7 @@ export default function Kalculator() {
       onDragOver={(e) => { if (e.dataTransfer?.types?.includes("Files")) e.preventDefault(); }}
       onDrop={(e) => { const f = e.dataTransfer?.files?.[0]; if (f) { e.preventDefault(); importFile(f); } }}>
       {showGraph && <GraphView plots={plots} angle={settings.angle} onToggle={togglePlot} onClose={() => setShowGraph(false)} />}
-      <input ref={fileInputRef} type="file" accept=".kalc,.json,application/json" hidden
+      <input ref={fileInputRef} type="file" accept=".kalc,.kalcsave,.json,application/json" hidden
         onChange={(e) => { importFile(e.target.files?.[0]); e.target.value = ""; }} />
 
       {/* Header: brand · document · mode switcher · settings/help */}
@@ -1177,6 +1243,7 @@ export default function Kalculator() {
         <div className="k-actions">
           <button className="k-iconbtn" title="Settings" aria-expanded={showSettings} onClick={() => setShowSettings((s) => !s)}><Icon name="sliders" /></button>
           <button className="k-iconbtn" title="Help & shortcuts" onClick={() => openInfo(helpTab)}>?</button>
+          <ProfileButton onClick={() => { setShowSettings(false); setSheet("profile"); }} />
         </div>
       </header>
 
@@ -1353,6 +1420,11 @@ export default function Kalculator() {
           persistent={Store.persistent && !saveFailed} fileName={fileHandles.current.get(doc.id)?.name}
           onClose={() => setSheet(null)} onOpen={openDocById} onNew={newDocument} onRename={renameDoc}
           onDuplicate={duplicateDoc} onDelete={deleteDocById} onSaveFile={saveToFile} onOpenFile={openFile} />
+      )}
+      {sheet === "profile" && (
+        <ProfileSheet toast={toast} onClose={() => setSheet(null)} onFile={importFile}
+          onSignOut={async () => { await flushSave(); await Account.signOut(); }}
+          onPrivacy={() => { setSheet(null); setInfo("privacy"); }} />
       )}
       {sheet === "pages" && (
         <PagesSheet docName={doc.name} pages={doc.pages} current={idxRef.current}
